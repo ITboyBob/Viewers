@@ -615,6 +615,25 @@ export default function createVolumeMaskCommands({
   }
 
   return {
+    exportMaskSegmentation: ({ segmentationId }: { segmentationId?: string } = {}) =>
+      exclusive('正在准备整个标注集的 DICOM SEG…', async () => {
+        const id =
+          segmentationId ||
+          segmentationService.getActiveSegmentation(viewportGridService.getActiveViewportId())
+            ?.segmentationId;
+        if (!id || !segmentationService.getSegmentation(id)?.representationData.Labelmap)
+          throw new Error('请先选择要导出的标注集。');
+        await commandsManager.run({
+          commandName: 'downloadSegmentation',
+          commandOptions: { segmentationId: id },
+          context: 'SEGMENTATION',
+        });
+        return {
+          changed: 0,
+          message:
+            '已生成整个标注集的 DICOM SEG，请查看浏览器下载；名称和颜色已包含，显隐与锁定不影响导出选区。',
+        };
+      }),
     thresholdMaskSeries: options =>
       exclusive('正在准备整组切片阈值选区…', () => thresholdSeries(options)),
     fillMaskHolesSeries: () => exclusive('正在准备整组逐片填洞…', fillSeries),

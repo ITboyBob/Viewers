@@ -1673,8 +1673,7 @@ function commandsModule({
      * @param props.segmentationId - The ID of the segmentation to download
      */
     downloadSegmentationCommand: ({ segmentationId }) => {
-      const { segmentationService } = servicesManager.services;
-      segmentationService.downloadSegmentation(segmentationId);
+      return actions.exportMaskSegmentation({ segmentationId });
     },
 
     /**
@@ -2649,6 +2648,7 @@ function commandsModule({
     discardMaskSplitPreview: actions.discardMaskSplitPreview,
     fillMaskHoles: actions.fillMaskHoles,
     fillMaskHolesSeries: actions.fillMaskHolesSeries,
+    exportMaskSegmentation: actions.exportMaskSegmentation,
     splitMaskComponents: actions.splitMaskComponents,
     setThresholdRange: actions.setThresholdRange,
     increaseBrushSize: actions.increaseBrushSize,

@@ -119,10 +119,11 @@ SEG 内的 SegmentNumber 与 JSON 中非空 Mask 的 `dicomSegmentNumber` 必须
 `contentKind=empty` 表示整份选区为空，不上传 SEG 文件；`segments` 可以为空，也可仅包含空 Mask，
 每个 `dicomSegmentNumber` 均为 `null`。这是明确清空当前标注的快照，不能当成“沿用上一版像素”。
 
-**现有代码只有 OHIF 原生 SEG 生成、下载和加载能力，尚未完成这套快照联调。**
-前端接入时必须验证原始 Stack 与 MPR / 体数据 Mask 都能完整序列化：读取 Mask 帧时优先使用
-`cornerstoneTools.segmentation.getLabelmapImageIds(segmentationId)`，不要假设 `Labelmap.imageIds` 总是存在。
-还需处理源帧加载、空 Mask、编号映射、侧栏状态恢复及重新编辑后的再次保存。
+**当前已补齐 Stack / MPR 的可靠 SEG 文件导出及逐帧验证，仍未完成这套快照联调。**
+`extensions/cornerstone-dicom-seg/src/utils/prepareSegmentationExport.ts` 已处理 SDK 帧解析、源帧补载、
+临时预览标签校验和与 dcmjs 一致的几何排序，接入保存时可复用；不要假设 `Labelmap.imageIds` 总是存在。
+还需完成空 Mask 侧车、编号映射、状态恢复及再次保存。当前 dcmjs 的嵌套序列字符集继承读取存在问题，
+恢复时需单独验证中文名称；不能将“UTF-8 导出字节正确”当成“名称往返已完成”。
 后端可使用 DICOM 库校验 SEG；不能仅以扩展名判断上传合法。
 
 ### 3.3 几何与源数据绑定

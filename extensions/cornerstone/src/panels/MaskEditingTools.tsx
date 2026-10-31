@@ -781,6 +781,18 @@ export default function MaskEditingTools() {
             重做
           </button>
         </div>
+        <button
+          type="button"
+          className={`${buttonClass} mt-3 w-full`}
+          disabled={busy || !active?.representationData.Labelmap}
+          onClick={() => run('exportMaskSegmentation', { segmentationId: active.segmentationId })}
+        >
+          导出 DICOM SEG
+        </button>
+        <p className="mask-help">
+          导出整个标注集的非空选区，包含隐藏或锁定的 Mask。请保留原始
+          CT；显隐和锁定设置不写入此文件。
+        </p>
         {feedback && (
           <p
             role={feedback.error ? 'alert' : 'status'}

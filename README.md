@@ -4,6 +4,7 @@
 小组成员请先阅读 [本地运行与功能说明](MASK_DEMO_README.md)、
 [后端标注与 DICOM 接口需求](BACKEND_API_REQUIREMENTS.md) 和 [OpenAPI 草案](docs/mask-backend.openapi.yaml)。
 接口文档描述后续开发约定，当前本地演示仍使用浏览器内存保存编辑结果。
+各轮优化的内容、原因与收益见 [优化记录](OPTIMIZATION_LOG.md)。
 
 ---
 

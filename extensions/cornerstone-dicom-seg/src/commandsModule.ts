@@ -1,12 +1,12 @@
 import dcmjs from 'dcmjs';
 import { classes, Types } from '@ohif/core';
-import { cache, metaData } from '@cornerstonejs/core';
-import { segmentation as cornerstoneToolsSegmentation } from '@cornerstonejs/tools';
+import { metaData } from '@cornerstonejs/core';
 import { adaptersRT, helpers, adaptersSEG } from '@cornerstonejs/adapters';
 import { createReportDialogPrompt } from '@ohif/extension-default';
 import { DicomMetadataStore } from '@ohif/core';
 
 import PROMPT_RESPONSES from '../../default/src/utils/_shared/PROMPT_RESPONSES';
+import prepareSegmentationExport from './utils/prepareSegmentationExport';
 
 const { datasetToBlob } = dcmjs.data;
 
@@ -90,49 +90,13 @@ const commandsModule = ({
      *
      * @returns Returns the generated segmentation data.
      */
-    generateSegmentation: ({ segmentationId, options = {} }) => {
-      const segmentation = cornerstoneToolsSegmentation.state.getSegmentation(segmentationId);
-
-      const { imageIds } = segmentation.representationData.Labelmap;
-
-      const segImages = imageIds.map(imageId => cache.getImage(imageId));
-      const referencedImages = segImages.map(image => cache.getImage(image.referencedImageId));
-
-      const labelmaps2D = [];
-
-      let z = 0;
-
-      for (const segImage of segImages) {
-        const segmentsOnLabelmap = new Set();
-        const pixelData = segImage.getPixelData();
-        const { rows, columns } = segImage;
-
-        // Use a single pass through the pixel data
-        for (let i = 0; i < pixelData.length; i++) {
-          const segment = pixelData[i];
-          if (segment !== 0) {
-            segmentsOnLabelmap.add(segment);
-          }
-        }
-
-        labelmaps2D[z++] = {
-          segmentsOnLabelmap: Array.from(segmentsOnLabelmap),
-          pixelData,
-          rows,
-          columns,
-        };
-      }
-
-      const allSegmentsOnLabelmap = labelmaps2D.map(labelmap => labelmap.segmentsOnLabelmap);
-
-      const labelmap3D = {
-        segmentsOnLabelmap: Array.from(new Set(allSegmentsOnLabelmap.flat())),
-        metadata: [],
-        labelmaps2D,
-      };
-
+    generateSegmentation: async ({ segmentationId, options = {} }) => {
       const segmentationInOHIF = segmentationService.getSegmentation(segmentationId);
+      if (!segmentationInOHIF?.representationData.Labelmap)
+        throw new Error('请先选择一个包含 Mask 的标注集。');
       const representations = segmentationService.getRepresentationsForSegmentation(segmentationId);
+      if (!representations.length) throw new Error('请先在视图中显示要导出的标注集。');
+      const metadata = [];
 
       Object.entries(segmentationInOHIF.segments).forEach(([segmentIndex, segment]) => {
         // segmentation service already has a color for each segment
@@ -170,8 +134,18 @@ const commandsModule = ({
             CodeMeaning: 'Tissue',
           },
         };
-        labelmap3D.metadata[segmentIndex] = segmentMetadata;
+        metadata[segmentIndex] = segmentMetadata;
       });
+
+      const { referencedImages, labelmaps2D, segmentsOnLabelmap } =
+        await prepareSegmentationExport(segmentationId);
+      const nonemptyMetadata = [];
+      segmentsOnLabelmap.forEach(index => {
+        nonemptyMetadata[index] = metadata[index];
+      });
+      const labelmap3D = { metadata: nonemptyMetadata, labelmaps2D, segmentsOnLabelmap };
+      if (referencedImages.length < 2)
+        throw new Error('当前导出器需要至少两张原始切片，请导入完整静态序列后再导出 DICOM SEG。');
 
       const generatedSegmentation = generateSegmentation(
         referencedImages,
@@ -179,6 +153,7 @@ const commandsModule = ({
         metaData,
         options
       );
+      generatedSegmentation.dataset.SpecificCharacterSet = 'ISO_IR 192';
 
       return generatedSegmentation;
     },
@@ -192,9 +167,9 @@ const commandsModule = ({
      * @param params.segmentationId - ID of the segmentation to be downloaded.
      *
      */
-    downloadSegmentation: ({ segmentationId }) => {
+    downloadSegmentation: async ({ segmentationId }) => {
       const segmentationInOHIF = segmentationService.getSegmentation(segmentationId);
-      const generatedSegmentation = actions.generateSegmentation({
+      const generatedSegmentation = await actions.generateSegmentation({
         segmentationId,
       });
 
@@ -238,7 +213,7 @@ const commandsModule = ({
             ? extensionManager.getDataSources(selectedDataSource)[0]
             : defaultDataSource;
 
-          const generatedData = actions.generateSegmentation({
+          const generatedData = await actions.generateSegmentation({
             segmentationId,
             options: {
               SeriesDescription: reportName || label || 'Research Derived Series',
