@@ -12,6 +12,7 @@ export default function PanelSegmentation({
   const { commandsManager, servicesManager } = useSystem();
   const {
     customizationService,
+    segmentationService,
     displaySetService,
     viewportGridService,
     cornerstoneViewportService,
@@ -45,6 +46,45 @@ export default function PanelSegmentation({
       unique.set(row.segmentation.segmentationId, row);
   });
   const segmentationsWithRepresentations = [...unique.values()];
+  const activeSegmentation = segmentationService.getActiveSegmentation(activeViewportId);
+  const activeSegment = segmentationService.getActiveSegment(activeViewportId);
+  const appearanceRepresentation = segmentationsWithRepresentations.find(
+    row => row.segmentation.segmentationId === activeSegmentation?.segmentationId
+  )?.representation;
+  const color =
+    activeSegment && activeSegmentation
+      ? segmentationService.getSegmentColor(
+          activeViewportId,
+          activeSegmentation.segmentationId,
+          activeSegment.segmentIndex
+        )
+      : undefined;
+  const appearanceTarget =
+    activeSegmentation && activeSegment
+      ? {
+          segmentationId: activeSegmentation.segmentationId,
+          segmentIndex: activeSegment.segmentIndex,
+          label: activeSegment.label,
+          color: color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : 'transparent',
+        }
+      : undefined;
+  const appearanceStyle =
+    allViewports && appearanceTarget && appearanceRepresentation?.type === 'Labelmap'
+      ? segmentationService.getStyle({
+          viewportId: activeViewportId,
+          segmentationId: appearanceTarget.segmentationId,
+          segmentIndex: appearanceTarget.segmentIndex,
+          type: appearanceRepresentation.type,
+        })
+      : undefined;
+  const setAppearance = (specifier, key: string, value: number | boolean) => {
+    if (allViewports) {
+      if (!specifier.segmentationId || !specifier.segmentIndex) return;
+      commandsManager.run('setMaskAppearance', { ...specifier, style: { [key]: value } });
+    } else {
+      commandsManager.run('setSegmentationStyle', { ...specifier, key, value });
+    }
+  };
 
   // Extract customization options
   const segmentationTableMode = customizationService.getCustomization(
@@ -72,7 +112,11 @@ export default function PanelSegmentation({
       commandsManager.run('addSegment', { segmentationId });
     },
     onSegmentClick: (segmentationId, segmentIndex) => {
-      commandsManager.run('setActiveSegmentAndCenter', { segmentationId, segmentIndex });
+      commandsManager.run('setActiveSegmentAndCenter', {
+        segmentationId,
+        segmentIndex,
+        highlightSegment: !allViewports,
+      });
     },
     onSegmentEdit: (segmentationId, segmentIndex) => {
       commandsManager.run('editSegmentLabel', { segmentationId, segmentIndex });
@@ -115,17 +159,17 @@ export default function PanelSegmentation({
     onSegmentationDelete: segmentationId => {
       commandsManager.run('deleteSegmentation', { segmentationId });
     },
-    setFillAlpha: ({ type }, value) => {
-      commandsManager.run('setFillAlpha', { type, value });
+    setFillAlpha: (specifier, value) => {
+      setAppearance(specifier, 'fillAlpha', value);
     },
-    setOutlineWidth: ({ type }, value) => {
-      commandsManager.run('setOutlineWidth', { type, value });
+    setOutlineWidth: (specifier, value) => {
+      setAppearance(specifier, 'outlineWidth', value);
     },
-    setRenderFill: ({ type }, value) => {
-      commandsManager.run('setRenderFill', { type, value });
+    setRenderFill: (specifier, value) => {
+      setAppearance(specifier, 'renderFill', value);
     },
-    setRenderOutline: ({ type }, value) => {
-      commandsManager.run('setRenderOutline', { type, value });
+    setRenderOutline: (specifier, value) => {
+      setAppearance(specifier, 'renderOutline', value);
     },
     setFillAlphaInactive: ({ type }, value) => {
       commandsManager.run('setFillAlphaInactive', { type, value });
@@ -200,6 +244,17 @@ export default function PanelSegmentation({
     data: segmentationsWithRepresentations,
     mode: segmentationTableMode,
     title,
+    ...(allViewports
+      ? {
+          appearanceScope: 'segment' as const,
+          appearanceTarget,
+          appearanceStyle,
+          appearanceDisabledReason:
+            appearanceRepresentation?.type !== 'Labelmap'
+              ? '请选择二维切片窗口，设置当前 Mask 的填充与轮廓。'
+              : undefined,
+        }
+      : {}),
     exportOptions,
     disableEditing,
     onSegmentationAdd,

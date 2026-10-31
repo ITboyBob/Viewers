@@ -28,6 +28,18 @@ export interface RepresentationStyles {
   renderOutline: boolean;
 }
 
+export interface AppearanceTarget {
+  segmentationId: string;
+  segmentIndex: number;
+  label: string;
+  color: string;
+}
+export interface AppearanceSpecifier {
+  type: string;
+  segmentationId?: string;
+  segmentIndex?: number;
+}
+
 export interface Representation {
   active: boolean;
   visible: boolean;
@@ -64,14 +76,18 @@ export interface SegmentationTableContextType {
   showAddSegment?: boolean;
   showSegmentIndex?: boolean;
   renderInactiveSegmentations?: boolean;
+  appearanceScope?: 'segment' | 'representation';
+  appearanceTarget?: AppearanceTarget;
+  appearanceStyle?: Partial<RepresentationStyles>;
+  appearanceDisabledReason?: string;
 
   // Function handlers
   setShowConfig?: (show: boolean) => void;
-  setRenderFill?: ({ type }: { type: string }, value: boolean) => void;
-  setRenderOutline?: ({ type }: { type: string }, value: boolean) => void;
-  setOutlineWidth?: ({ type }: { type: string }, value: number) => void;
-  setFillAlpha?: ({ type }: { type: string }, value: number) => void;
-  setFillAlphaInactive?: ({ type }: { type: string }, value: number) => void;
+  setRenderFill?: (specifier: AppearanceSpecifier, value: boolean) => void;
+  setRenderOutline?: (specifier: AppearanceSpecifier, value: boolean) => void;
+  setOutlineWidth?: (specifier: AppearanceSpecifier, value: number) => void;
+  setFillAlpha?: (specifier: AppearanceSpecifier, value: number) => void;
+  setFillAlphaInactive?: (specifier: AppearanceSpecifier, value: number) => void;
   toggleRenderInactiveSegmentations?: () => void;
   onSegmentationAdd?: (segmentationId: string) => void;
   onSegmentationClick?: (segmentationId: string) => void;

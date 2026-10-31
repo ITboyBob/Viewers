@@ -1600,7 +1600,11 @@ function commandsModule({
      * @param props.segmentationId - The ID of the segmentation
      * @param props.segmentIndex - The index of the segment to activate
      */
-    setActiveSegmentAndCenterCommand: ({ segmentationId, segmentIndex }) => {
+    setActiveSegmentAndCenterCommand: ({
+      segmentationId,
+      segmentIndex,
+      highlightSegment = true,
+    }) => {
       const { segmentationService, viewportGridService } = servicesManager.services;
       // set both active segmentation and active segment
       segmentationService.setActiveSegmentation(
@@ -1608,7 +1612,13 @@ function commandsModule({
         segmentationId
       );
       segmentationService.setActiveSegment(segmentationId, segmentIndex);
-      segmentationService.jumpToSegmentCenter(segmentationId, segmentIndex);
+      segmentationService.jumpToSegmentCenter(
+        segmentationId,
+        segmentIndex,
+        undefined,
+        0.9,
+        highlightSegment
+      );
     },
 
     /**
@@ -1720,6 +1730,42 @@ function commandsModule({
     setSegmentationStyleCommand: ({ type, key, value }) => {
       const { segmentationService } = servicesManager.services;
       segmentationService.setStyle({ type }, { [key]: value });
+    },
+    setMaskAppearance: ({ segmentationId, segmentIndex, style }) => {
+      const { segmentationService } = servicesManager.services;
+      const target = segmentationService.getSegmentation(segmentationId)?.segments[segmentIndex];
+      if (!target || !Number.isInteger(segmentIndex) || segmentIndex < 1) return;
+      const patch = {};
+      const keys: Record<string, { inactive: string; min?: number; max?: number }> = {
+        fillAlpha: { inactive: 'fillAlphaInactive', min: 0, max: 1 },
+        outlineWidth: { inactive: 'outlineWidthInactive', min: 0, max: 10 },
+        renderFill: { inactive: 'renderFillInactive' },
+        renderOutline: { inactive: 'renderOutlineInactive' },
+      };
+      for (const [key, value] of Object.entries(style)) {
+        const rule = keys[key];
+        if (
+          !rule ||
+          (rule.min === undefined
+            ? typeof value !== 'boolean'
+            : typeof value !== 'number' ||
+              !Number.isFinite(value) ||
+              value < rule.min ||
+              value > rule.max)
+        )
+          return;
+        patch[key] = value;
+        patch[rule.inactive] = value;
+      }
+      const specifier = {
+        type: Enums.SegmentationRepresentations.Labelmap,
+        segmentationId,
+        segmentIndex,
+      };
+      segmentationService.setStyle(specifier, patch);
+      segmentationService.getViewportIdsWithSegmentation(segmentationId).forEach(viewportId => {
+        segmentationService.setStyle({ ...specifier, viewportId }, patch);
+      });
     },
 
     /**
@@ -2625,6 +2671,7 @@ function commandsModule({
       commandFn: actions.deleteActiveAnnotation,
     },
     setDisplaySetsForViewports: actions.setDisplaySetsForViewports,
+    setMaskAppearance: actions.setMaskAppearance,
     undo: actions.undo,
     redo: actions.redo,
     interpolateLabelmap: actions.interpolateLabelmap,

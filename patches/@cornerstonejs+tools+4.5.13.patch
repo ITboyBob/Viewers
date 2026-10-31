@@ -227,3 +227,68 @@ diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surfa
      actor.getProperty().setColor(color[0] / 255, color[1] / 255, color[2] / 255);
      actor.getProperty().setLineWidth(2);
      const representationUID = getSurfaceRepresentationUID(segmentationId, surface.segmentIndex);
+diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Labelmap/labelmapDisplay.js b/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Labelmap/labelmapDisplay.js
+--- a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Labelmap/labelmapDisplay.js
++++ b/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Labelmap/labelmapDisplay.js
+@@ -102,7 +102,9 @@
+     const renderInactiveSegmentations = segmentationStyle.getRenderInactiveSegmentations(viewportId);
+     const colorLUT = getColorLUT(colorLUTIndex);
+     const numColors = Math.min(256, colorLUT.length);
+-    const { outlineWidth, renderOutline, outlineOpacity, activeSegmentOutlineWidthDelta, } = _getLabelmapConfig(labelmapStyle, isActiveLabelmap);
++    const { outlineOpacity } = _getLabelmapConfig(labelmapStyle, isActiveLabelmap);
++    const activeSegmentIndex = getActiveSegmentIndex(segmentationId);
++    const outlineWidths = new Array(numColors - 1).fill(0);
+     const segmentsHidden = internalGetHiddenSegmentIndices(viewportId, {
+         segmentationId,
+         type: SegmentationRepresentations.Labelmap,
+@@ -117,7 +119,10 @@
+             segmentIndex,
+         });
+         const segmentSpecificLabelmapConfig = perSegmentStyle;
+-        const { fillAlpha, outlineWidth, renderFill, renderOutline } = _getLabelmapConfig(labelmapStyle, isActiveLabelmap, segmentSpecificLabelmapConfig);
++        const { fillAlpha, outlineWidth, renderFill, renderOutline, activeSegmentOutlineWidthDelta } = _getLabelmapConfig(labelmapStyle, isActiveLabelmap, segmentSpecificLabelmapConfig);
++        if (segmentIndex > 0 && renderOutline && !segmentsHidden.has(segmentIndex)) {
++            outlineWidths[segmentIndex - 1] = Math.max(0, outlineWidth + (segmentIndex === activeSegmentIndex ? activeSegmentOutlineWidthDelta : 0));
++        }
+         const { forceOpacityUpdate, forceColorUpdate } = _needsTransferFunctionUpdate(viewportId, segmentationId, segmentIndex, {
+             fillAlpha,
+             renderFill,
+@@ -155,32 +160,12 @@
+         labelmapActor.getProperty().setScalarOpacity(0, ofun);
+         labelmapActor.getProperty().setInterpolationTypeToNearest();
+     }
+-    if (renderOutline) {
+-        labelmapActor.getProperty().setUseLabelOutline(renderOutline);
+-        labelmapActor.getProperty().setLabelOutlineOpacity(outlineOpacity);
+-        const activeSegmentIndex = getActiveSegmentIndex(segmentationRepresentation.segmentationId);
+-        const outlineWidths = new Array(numColors - 1);
+-        for (let i = 1; i < numColors; i++) {
+-            const isHidden = segmentsHidden.has(i);
+-            if (isHidden) {
+-                outlineWidths[i - 1] = 0;
+-                continue;
+-            }
+-            outlineWidths[i - 1] =
+-                i === activeSegmentIndex
+-                    ? outlineWidth + activeSegmentOutlineWidthDelta
+-                    : outlineWidth;
+-        }
+-        labelmapActor.getProperty().setLabelOutlineThickness(outlineWidths);
+-        labelmapActor.modified();
+-        labelmapActor.getProperty().modified();
+-        labelmapActor.getMapper().modified();
+-    }
+-    else {
+-        labelmapActor
+-            .getProperty()
+-            .setLabelOutlineThickness(new Array(numColors - 1).fill(0));
+-    }
++    labelmapActor.getProperty().setUseLabelOutline(outlineWidths.some(width => width > 0));
++    labelmapActor.getProperty().setLabelOutlineOpacity(outlineOpacity);
++    labelmapActor.getProperty().setLabelOutlineThickness(outlineWidths);
++    labelmapActor.modified();
++    labelmapActor.getProperty().modified();
++    labelmapActor.getMapper().modified();
+     const visible = isActiveLabelmap || renderInactiveSegmentations;
+     labelmapActor.setVisibility(visible);
+ }

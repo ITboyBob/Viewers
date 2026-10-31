@@ -19,5 +19,21 @@
   "Show": "显示",
   "Hide": "隐藏",
   "Segmentations": "标注集",
-  "Segments": "Masks"
+  "Segments": "Masks",
+  "Fill & Outline": "填充+轮廓",
+  "Outline Only": "仅轮廓",
+  "Fill Only": "仅填充",
+  "Opacity": "填充不透明度",
+  "Border": "轮廓宽度",
+  "Mask appearance settings": "Mask 外观设置",
+  "Current Mask": "当前 Mask",
+  "Applies only to this Mask in 2D slices": "仅调整此 Mask 的二维切片外观",
+  "Select a Mask to adjust its appearance": "请先选择要调整的 Mask",
+  "Mask fill opacity slider": "Mask 填充不透明度滑块",
+  "Mask fill opacity": "Mask 填充不透明度",
+  "Mask outline width slider": "Mask 轮廓宽度滑块",
+  "Mask outline width": "Mask 轮廓宽度",
+  "Fill opacity applies when filling is enabled": "仅轮廓模式不显示填充；启用填充后可调整不透明度。",
+  "Display inactive segmentations": "显示其他标注集",
+  "Inactive segmentation opacity": "其他标注集不透明度"
 }
