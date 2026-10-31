@@ -18,9 +18,10 @@ import Dialog from './Dialog.json';
 import Modals from './Modals.json';
 import Local from './Local.json';
 import ErrorBoundary from './ErrorBoundary.json';
+import SegmentationTable from './SegmentationTable.json';
 
 export default {
-  'zh': {
+  zh: {
     AboutModal,
     Buttons,
     CineDialog,
@@ -41,5 +42,8 @@ export default {
     Modals,
     Local,
     ErrorBoundary,
+    SegmentationTable,
+    'SegmentationTable.HeaderCollapsed': SegmentationTable,
+    'SegmentationTable.AppearanceSettings': SegmentationTable,
   },
 };

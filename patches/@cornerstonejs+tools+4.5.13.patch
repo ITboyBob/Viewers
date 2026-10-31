@@ -176,3 +176,54 @@ diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/Brush
      }
      acceptPreview(element = this._previewData.element) {
          if (!element) {
+diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/addOrUpdateSurfaceToElement.js b/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/addOrUpdateSurfaceToElement.js
+--- a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/addOrUpdateSurfaceToElement.js
++++ b/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/addOrUpdateSurfaceToElement.js
+@@ -5,6 +5,7 @@
+ import vtkPolyData from '@kitware/vtk.js/Common/DataModel/PolyData';
+ import vtkCellArray from '@kitware/vtk.js/Common/Core/CellArray';
+ import { getSurfaceActorEntry, getSurfaceRepresentationUID, } from '../../../stateManagement/segmentation/helpers/getSegmentationActor';
++const surfaceGeometryByActor = new WeakMap();
+ function addOrUpdateSurfaceToElement(element, surface, segmentationId) {
+     const enabledElement = getEnabledElement(element);
+     const { viewport } = enabledElement;
+@@ -12,18 +13,18 @@
+     const surfaceActor = surfaceActorEntry?.actor;
+     const isVisible = surface.visible;
+     if (surfaceActor) {
++        const color = surface.color;
++        surfaceActor.getProperty().setColor(color[0] / 255, color[1] / 255, color[2] / 255);
+         surfaceActor.setVisibility(isVisible);
+         if (!isVisible) {
+             return;
+         }
+         const surfaceMapper = surfaceActor.getMapper();
+-        const currentPolyData = surfaceMapper.getInputData();
+         const newPoints = surface.points;
+         const newPolys = surface.polys;
+-        const currentPoints = currentPolyData.getPoints().getData();
+-        const currentPolys = currentPolyData.getPolys().getData();
+-        if (newPoints.length === currentPoints.length &&
+-            newPolys.length === currentPolys.length) {
++        // PolySeg replaces these arrays after edits, including edits with unchanged mesh sizes.
++        const previous = surfaceGeometryByActor.get(surfaceActor);
++        if (previous?.points === newPoints && previous?.polys === newPolys) {
+             return;
+         }
+         const polyData = vtkPolyData.newInstance();
+@@ -33,6 +34,7 @@
+         });
+         polyData.setPolys(triangles);
+         surfaceMapper.setInputData(polyData);
++        surfaceGeometryByActor.set(surfaceActor, { points: newPoints, polys: newPolys });
+         surfaceMapper.modified();
+         viewport.getRenderer().resetCameraClippingRange();
+         return;
+@@ -51,6 +53,7 @@
+     mapper.setInputData(surfacePolyData);
+     const actor = vtkActor.newInstance();
+     actor.setMapper(mapper);
++    surfaceGeometryByActor.set(actor, { points, polys });
+     actor.getProperty().setColor(color[0] / 255, color[1] / 255, color[2] / 255);
+     actor.getProperty().setLineWidth(2);
+     const representationUID = getSurfaceRepresentationUID(segmentationId, surface.segmentIndex);

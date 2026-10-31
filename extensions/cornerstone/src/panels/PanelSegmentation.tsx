@@ -1,15 +1,50 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { SegmentationTable } from '@ohif/ui-next';
 import { useActiveViewportSegmentationRepresentations } from '../hooks/useActiveViewportSegmentationRepresentations';
 import { metaData, cache } from '@cornerstonejs/core';
 import { useSystem } from '@ohif/core/src';
 
-export default function PanelSegmentation({ children }: withAppTypes) {
+export default function PanelSegmentation({
+  children,
+  title = 'Segmentations',
+  allViewports = false,
+}: withAppTypes<{ children?: React.ReactNode; title?: string; allViewports?: boolean }>) {
   const { commandsManager, servicesManager } = useSystem();
-  const { customizationService, displaySetService } = servicesManager.services;
+  const {
+    customizationService,
+    displaySetService,
+    viewportGridService,
+    cornerstoneViewportService,
+  } = servicesManager.services;
 
-  const { segmentationsWithRepresentations, disabled } =
+  const { segmentationsWithRepresentations: representationRows, disabled } =
     useActiveViewportSegmentationRepresentations();
+  const activeViewportId = viewportGridService.getActiveViewportId();
+  const [readyViewportId, setReadyViewportId] = useState<string>();
+  useEffect(() => {
+    const update = () => {
+      const viewport = cornerstoneViewportService.getCornerstoneViewport(activeViewportId);
+      const displaySetId = viewportGridService.getDisplaySetsUIDsForViewport(activeViewportId)?.[0];
+      const displaySet = displaySetId && displaySetService.getDisplaySetByUID(displaySetId);
+      setReadyViewportId(displaySet?.imageIds?.length && viewport ? activeViewportId : undefined);
+    };
+    const subscription = cornerstoneViewportService.subscribe(
+      cornerstoneViewportService.EVENTS.VIEWPORT_DATA_CHANGED,
+      update
+    );
+    update();
+    return () => subscription.unsubscribe();
+  }, [activeViewportId, cornerstoneViewportService, displaySetService, viewportGridService]);
+  const currentViewport = cornerstoneViewportService.getCornerstoneViewport(
+    viewportGridService.getActiveViewportId()
+  );
+  const preferredType = currentViewport?.type === 'volume3d' ? 'Surface' : 'Labelmap';
+  const unique = new Map<string, (typeof representationRows)[number]>();
+  representationRows.forEach(row => {
+    if (!unique.has(row.segmentation.segmentationId) || row.representation.type === preferredType)
+      unique.set(row.segmentation.segmentationId, row);
+  });
+  const segmentationsWithRepresentations = [...unique.values()];
 
   // Extract customization options
   const segmentationTableMode = customizationService.getCustomization(
@@ -22,11 +57,11 @@ export default function PanelSegmentation({ children }: withAppTypes) {
   const showAddSegment = customizationService.getCustomization('panelSegmentation.showAddSegment');
   const CustomDropdownMenuContent = customizationService.getCustomization(
     'panelSegmentation.customDropdownMenuContent'
-  );
+  ) as unknown as React.ComponentType;
 
   const CustomSegmentStatisticsHeader = customizationService.getCustomization(
     'panelSegmentation.customSegmentStatisticsHeader'
-  );
+  ) as unknown as React.ComponentType;
 
   // Create handlers object for all command runs
   const handlers = {
@@ -46,13 +81,18 @@ export default function PanelSegmentation({ children }: withAppTypes) {
       commandsManager.run('editSegmentationLabel', { segmentationId });
     },
     onSegmentColorClick: (segmentationId, segmentIndex) => {
-      commandsManager.run('editSegmentColor', { segmentationId, segmentIndex });
+      commandsManager.run('editSegmentColor', { segmentationId, segmentIndex, allViewports });
     },
     onSegmentDelete: (segmentationId, segmentIndex) => {
       commandsManager.run('deleteSegment', { segmentationId, segmentIndex });
     },
     onToggleSegmentVisibility: (segmentationId, segmentIndex, type) => {
-      commandsManager.run('toggleSegmentVisibility', { segmentationId, segmentIndex, type });
+      commandsManager.run('toggleSegmentVisibility', {
+        segmentationId,
+        segmentIndex,
+        type,
+        allViewports,
+      });
     },
     onToggleSegmentLock: (segmentationId, segmentIndex) => {
       commandsManager.run('toggleSegmentLock', { segmentationId, segmentIndex });
@@ -103,10 +143,16 @@ export default function PanelSegmentation({ children }: withAppTypes) {
     if (!Labelmap) {
       return { segmentationId, isExportable: true };
     }
+    const labelmap = Labelmap as {
+      imageIds?: string[];
+      volumeId?: string;
+      referencedImageIds?: string[];
+    };
+    const volume = labelmap.volumeId ? cache.getVolume(labelmap.volumeId) : undefined;
+    const imageIds = labelmap.imageIds || volume?.imageIds || [];
 
     // Check if any segments have anything drawn in any of the viewports
     const hasAnySegmentData = (() => {
-      const imageIds = Labelmap.imageIds;
       if (!imageIds?.length) return false;
 
       for (const imageId of imageIds) {
@@ -124,8 +170,11 @@ export default function PanelSegmentation({ children }: withAppTypes) {
       return { segmentationId, isExportable: false };
     }
 
-    const referencedImageIds = Labelmap.referencedImageIds;
-    const firstImageId = referencedImageIds[0];
+    const firstImageId =
+      labelmap.referencedImageIds?.[0] ||
+      cache.getImage(imageIds[0])?.referencedImageId ||
+      volume?.referencedImageIds?.[0];
+    if (!firstImageId) return { segmentationId, isExportable: false };
     const instance = metaData.get('instance', firstImageId);
 
     if (!instance) {
@@ -147,10 +196,10 @@ export default function PanelSegmentation({ children }: withAppTypes) {
 
   // Common props for SegmentationTable
   const tableProps = {
-    disabled,
+    disabled: disabled || !readyViewportId || readyViewportId !== activeViewportId,
     data: segmentationsWithRepresentations,
     mode: segmentationTableMode,
-    title: 'Segmentations',
+    title,
     exportOptions,
     disableEditing,
     onSegmentationAdd,

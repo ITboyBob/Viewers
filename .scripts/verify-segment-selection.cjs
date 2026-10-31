@@ -38,10 +38,11 @@ async function activeIndex(page) {
     await page.waitForURL(/segmentation\/dicomlocal/);
     await page.locator('[data-cy="addSegmentation"]').click();
     await page.getByLabel('阈值处理范围').selectOption('slice');
-    await page.getByLabel('拆分处理范围').selectOption('slice');
     const threshold = page.getByRole('button', { name: '应用阈值到当前切片', exact: true });
     await expect(threshold).toBeEnabled();
     await threshold.click();
+    await page.getByRole('tab', { name: '拆分', exact: true }).click();
+    await page.getByLabel('拆分处理范围').selectOption('slice');
     await page.getByRole('button', { name: 'Split Mask 拆分（单片）', exact: true }).click();
     await expect(page.locator('[data-cy="data-row"]')).toHaveCount(2);
     const confirm = page.getByRole('button', { name: 'Confirm and hide', exact: true });
@@ -95,6 +96,7 @@ async function activeIndex(page) {
         { timeout: 30000 }
       )
       .toBe(true);
+    await page.getByRole('tab', { name: '阈值', exact: true }).click();
     await expect(threshold).toBeEnabled({ timeout: 30000 });
     await page.locator('[data-cy="data-row"]').nth(1).click();
     assert.equal(await activeIndex(page), 2);

@@ -88,6 +88,7 @@ async function editFixture(page, action) {
     const original = await snapshot(page);
     const analyze = panel.getByRole('button', { name: 'Split Mask 三维预览', exact: true });
     const preview = panel.getByRole('region', { name: '三维拆分预览', exact: true });
+    await page.getByRole('tab', { name: '拆分', exact: true }).click();
     await expect(page.getByLabel('拆分处理范围')).toHaveValue('series');
     const hover = await page.evaluate(() => {
       const s = window.services;
@@ -119,6 +120,7 @@ async function editFixture(page, action) {
         })
       )
       .toBe(true);
+    await page.getByRole('tab', { name: '拆分', exact: true }).click();
     await analyze.click();
     await expect(preview).toContainText('2 个可拆分区域');
     await expect(preview.getByRole('row')).toHaveCount(3);
@@ -203,6 +205,7 @@ async function editFixture(page, action) {
         { timeout: 30000 }
       )
       .toBe(true);
+    await page.getByRole('tab', { name: '拆分', exact: true }).click();
     await page.getByLabel('拆分最小区域体素数').fill('2');
     await analyze.click();
     await expect(preview).toContainText('2 个可拆分区域');

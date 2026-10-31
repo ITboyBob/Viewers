@@ -1,0 +1,23 @@
+{
+  "Add Segmentation": "新建标注集",
+  "Add Segment": "新建 Mask",
+  "Select a segmentation": "选择标注集",
+  "Create New Segmentation": "新建标注集",
+  "Manage Current Segmentation": "管理当前标注集",
+  "Segmentation Not Supported": "当前影像不支持创建 Mask",
+  "Remove from Viewport": "从当前视图移除",
+  "Rename": "重命名",
+  "Delete": "删除",
+  "Download & Export": "下载与导出",
+  "Download": "下载",
+  "Export": "导出",
+  "CSV Report": "CSV 统计报告",
+  "Actions": "操作",
+  "Change Color": "修改颜色",
+  "Lock": "锁定",
+  "Unlock": "解锁",
+  "Show": "显示",
+  "Hide": "隐藏",
+  "Segmentations": "标注集",
+  "Segments": "Masks"
+}

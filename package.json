@@ -30,6 +30,8 @@
     "test:mask-volume": "node .scripts/verify-volume-mask.cjs",
     "test:mask-mpr-brushes": "node .scripts/verify-mpr-brushes.cjs",
     "test:mask-split-volume": "node .scripts/verify-volume-split.cjs",
+    "test:mask-workbench": "node .scripts/verify-mask-workbench.cjs",
+    "test:mask-continuity": "node .scripts/verify-mask-continuity.cjs",
     "dev:mask": "cross-env APP_CONFIG=config/mask-demo.js yarn dev",
     "test:mask-editing": "node --experimental-strip-types --test .scripts/tests/mask-editing.test.cjs .scripts/tests/mask-commands.test.cjs .scripts/tests/sphere-tool-support.test.cjs .scripts/tests/volume-mask.test.cjs .scripts/tests/volume-commands.test.cjs",
     "cm": "npx git-cz",

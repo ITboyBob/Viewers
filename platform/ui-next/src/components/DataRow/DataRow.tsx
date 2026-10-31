@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button/Button';
 import {
   DropdownMenu,
@@ -102,6 +103,7 @@ const DataRow = React.forwardRef<HTMLDivElement, DataRowProps>(
     },
     ref
   ) => {
+    const { t } = useTranslation('SegmentationTable');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const isTitleLong = title?.length > 25;
 
@@ -264,7 +266,7 @@ const DataRow = React.forwardRef<HTMLDivElement, DataRowProps>(
               className={`h-6 w-6 transition-opacity ${
                 isSelected || !isVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
               }`}
-              aria-label={isVisible ? 'Hide' : 'Show'}
+              aria-label={t(isVisible ? 'Hide' : 'Show')}
               onClick={e => {
                 e.stopPropagation();
                 onToggleVisibility(e);
@@ -291,7 +293,7 @@ const DataRow = React.forwardRef<HTMLDivElement, DataRowProps>(
                         ? 'opacity-100'
                         : 'opacity-0 group-hover:opacity-100'
                     }`}
-                    aria-label="Actions"
+                    aria-label={t('Actions')}
                     dataCY="actionsMenuTrigger"
                     onClick={e => e.stopPropagation()} // Prevent row selection on button click
                   >
@@ -310,7 +312,7 @@ const DataRow = React.forwardRef<HTMLDivElement, DataRowProps>(
                         className="pl-2"
                         data-cy="Rename"
                       >
-                        Rename
+                        {t('Rename')}
                       </span>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={e => handleAction('Delete', e)}>
@@ -319,7 +321,7 @@ const DataRow = React.forwardRef<HTMLDivElement, DataRowProps>(
                         className="pl-2"
                         data-cy="Delete"
                       >
-                        Delete
+                        {t('Delete')}
                       </span>
                     </DropdownMenuItem>
                     {onColor && (
@@ -329,7 +331,7 @@ const DataRow = React.forwardRef<HTMLDivElement, DataRowProps>(
                           className="pl-2"
                           data-cy="Change Color"
                         >
-                          Change Color
+                          {t('Change Color')}
                         </span>
                       </DropdownMenuItem>
                     )}
@@ -339,7 +341,7 @@ const DataRow = React.forwardRef<HTMLDivElement, DataRowProps>(
                         className="pl-2"
                         data-cy="LockToggle"
                       >
-                        {isLocked ? 'Unlock' : 'Lock'}
+                        {t(isLocked ? 'Unlock' : 'Lock')}
                       </span>
                     </DropdownMenuItem>
                   </>

@@ -7,7 +7,7 @@ import {
   Types,
 } from '@cornerstonejs/core';
 import { segmentation, utilities as toolUtilities } from '@cornerstonejs/tools';
-import { thresholdSlice } from './maskAlgorithms';
+import { thresholdSlice, fillHolesSlice } from './maskAlgorithms';
 import { markSeedComponent, analyzeMaskComponents } from './volumeAlgorithms';
 import { reportMaskOperation } from './maskOperationEvents';
 import type { MaskSplitPreview, VolumeSplitAnalysis } from './splitMaskTypes';
@@ -295,6 +295,52 @@ export default function createVolumeMaskCommands({
     }
   }
 
+  async function fillSeries() {
+    const target = targetFor();
+    const frames = frameData(target);
+    const memos: LabelmapMemo[] = [];
+    let changed = 0;
+    try {
+      for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+        ensureTarget(target);
+        const frame = frames[frameIndex];
+        const labels = frame.voxelManager.getScalarData();
+        const filled = fillHolesSlice(
+          labels,
+          frame.image.columns,
+          frame.image.rows,
+          target.segmentIndex
+        );
+        const memo = toolUtilities.segmentation.LabelmapMemo.createLabelmapMemo(
+          target.segmentationId,
+          frame.voxelManager
+        );
+        memos.push(memo);
+        for (let index = 0; index < filled.length; index++) {
+          if (labels[index] !== filled[index]) {
+            memo.voxelManager.setAtIndex(index, filled[index]);
+            changed++;
+          }
+        }
+        memo.commitMemo();
+        reportMaskOperation('progress', `正在逐片填洞 ${frameIndex + 1}/${frames.length}…`);
+        if (frameIndex % 4 === 3) await pause();
+      }
+      ensureTarget(target);
+      saveHistory(
+        target.segmentationId,
+        memos.filter(memo => memo.commitMemo())
+      );
+      return {
+        changed,
+        message: `整组 ${frames.length} 张切片逐片填洞完成，填充 ${changed} 个像素。`,
+      };
+    } catch (error) {
+      rollback(target.segmentationId, memos);
+      throw error;
+    }
+  }
+
   function maskVolumeFor(target: ReturnType<typeof targetFor>) {
     const volume = target.labelmap.volumeId
       ? cache.getVolume(target.labelmap.volumeId)
@@ -571,6 +617,7 @@ export default function createVolumeMaskCommands({
   return {
     thresholdMaskSeries: options =>
       exclusive('正在准备整组切片阈值选区…', () => thresholdSeries(options)),
+    fillMaskHolesSeries: () => exclusive('正在准备整组逐片填洞…', fillSeries),
     growMaskFromSeed: options => exclusive('正在准备区域生长…', () => growFromSeed(options)),
     analyzeMaskSplit: options => exclusive('正在准备三维拆分分析…', () => analyzeSplit(options)),
     applyMaskSplit: options => exclusive('正在应用整组三维拆分…', () => applySplit(options)),

@@ -92,6 +92,7 @@ class SegmentationService extends PubSubService {
 
   private _segmentationIdToColorLUTIndexMap: Map<string, number>;
   private _segmentationGroupStatsMap: Map<string, any>;
+  private _projectSegmentVisibility = new Map<string, Map<number, boolean>>();
   readonly servicesManager: AppTypes.ServicesManager;
   highlightIntervalId = null;
   readonly EVENTS = EVENTS;
@@ -230,6 +231,7 @@ class SegmentationService extends PubSubService {
   }
 
   public destroy = () => {
+    this._projectSegmentVisibility.clear();
     eventTarget.removeEventListener(
       csToolsEnums.Events.SEGMENTATION_MODIFIED,
       this._onSegmentationModifiedFromSource
@@ -330,17 +332,18 @@ class SegmentationService extends PubSubService {
    */
   public async createLabelmapForDisplaySet(
     displaySet: AppTypes.DisplaySet,
-    options?: {
+    options: {
       segmentationId?: string;
       segments?: { [segmentIndex: number]: Partial<cstTypes.Segment> };
       FrameOfReferenceUID?: string;
       label?: string;
-    }
+    } = {}
   ): Promise<string> {
     // Todo: random does not makes sense, make this better, like
     // labelmap 1, 2, 3 etc
     const segmentationId = options?.segmentationId ?? `${csUtils.uuidv4()}`;
 
+    if (!displaySet?.imageIds?.length) throw new Error('影像尚未加载完成，无法新建 Mask。');
     const isDynamicVolume = displaySet.isDynamicVolume;
 
     let referenceImageIds = displaySet.imageIds;
@@ -375,7 +378,7 @@ class SegmentationService extends PubSubService {
             ? options.segments
             : {
                 1: {
-                  label: `${i18n.t('Segment')} 1`,
+                  label: `${i18n.t('Common:Segment')} 1`,
                   active: true,
                 },
               },
@@ -818,7 +821,7 @@ class SegmentationService extends PubSubService {
     } = {}
   ): void {
     if (config?.segmentIndex === 0) {
-      throw new Error(i18n.t('Segment') + ' index 0 is reserved for "no label"');
+      throw new Error(i18n.t('Common:Segment') + ' index 0 is reserved for "no label"');
     }
 
     const csSegmentation = this.getCornerstoneSegmentation(segmentationId);
@@ -833,7 +836,7 @@ class SegmentationService extends PubSubService {
 
     // update the segmentation
     if (!config.label) {
-      config.label = `${i18n.t('Segment')} ${segmentIndex}`;
+      config.label = `${i18n.t('Common:Segment')} ${segmentIndex}`;
     }
 
     const currentSegments = csSegmentation.segments;
@@ -893,7 +896,22 @@ class SegmentationService extends PubSubService {
    *
    */
   public removeSegment(segmentationId: string, segmentIndex: number): void {
+    this._projectSegmentVisibility.get(segmentationId)?.delete(segmentIndex);
     cstSegmentation.removeSegment(segmentationId, segmentIndex);
+  }
+
+  /** Project Mask visibility also applies to representations created by later layout changes. */
+  public setSegmentVisibilityForAllViewports(
+    segmentationId: string,
+    segmentIndex: number,
+    visible: boolean
+  ): void {
+    if (!this._projectSegmentVisibility.has(segmentationId))
+      this._projectSegmentVisibility.set(segmentationId, new Map());
+    this._projectSegmentVisibility.get(segmentationId).set(segmentIndex, visible);
+    this.getViewportIdsWithSegmentation(segmentationId).forEach(viewportId =>
+      this.setSegmentVisibility(viewportId, segmentationId, segmentIndex, visible)
+    );
   }
 
   public setSegmentVisibility(
@@ -975,6 +993,23 @@ class SegmentationService extends PubSubService {
       segmentIndex,
       color
     );
+  }
+
+  /** Use one color table for this project's current and future viewport representations. */
+  public setSegmentColorForAllViewports(
+    segmentationId: string,
+    segmentIndex: number,
+    color: csTypes.Color
+  ): void {
+    const viewportIds = this.getViewportIdsWithSegmentation(segmentationId);
+    const first =
+      viewportIds[0] && this.getSegmentationRepresentations(viewportIds[0], { segmentationId })[0];
+    if (!first) return;
+    this._segmentationIdToColorLUTIndexMap.set(segmentationId, first.colorLUTIndex);
+    viewportIds.forEach(viewportId => {
+      cstSegmentation.config.color.setColorLUT(viewportId, segmentationId, first.colorLUTIndex);
+      this.setSegmentColor(viewportId, segmentationId, segmentIndex, color);
+    });
   }
 
   /**
@@ -1139,10 +1174,12 @@ class SegmentationService extends PubSubService {
    * @param segmentationId - The ID of the segmentation to remove.
    */
   public remove(segmentationId: string): void {
+    this._projectSegmentVisibility.delete(segmentationId);
     cstSegmentation.state.removeSegmentation(segmentationId);
   }
 
   public removeAllSegmentations(): void {
+    this._projectSegmentVisibility.clear();
     cstSegmentation.state.removeAllSegmentations();
   }
 
@@ -1386,8 +1423,14 @@ class SegmentationService extends PubSubService {
       config: { colorLUTOrIndex: colorLUTIndex, ...config },
     };
 
-    const addRepresentation = () =>
+    const addRepresentation = () => {
       cstSegmentation.addSegmentationRepresentations(viewportId, [representation]);
+      this._projectSegmentVisibility
+        .get(segmentationId)
+        ?.forEach((visible, segmentIndex) =>
+          this.setSegmentVisibility(viewportId, segmentationId, segmentIndex, visible)
+        );
+    };
 
     if (isConverted) {
       const { viewportGridService } = this.servicesManager.services;

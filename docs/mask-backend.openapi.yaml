@@ -1,0 +1,664 @@
+openapi: 3.0.3
+info:
+  title: OHIF 单人标注业务接口需求草案
+  version: 0.1.0
+  description: |
+    待实现的接口约定，当前分支没有实现这些后端路由或前端保存适配。
+    详见仓库根目录 BACKEND_API_REQUIREMENTS.md。
+    DICOM 影像查询和像素读取使用独立 /dicomweb 标准服务，不在本文件中重新定义。
+    /dicom/imports 是可选上传门面；已有 STOW-RS 时可由前端直接对接标准上传。
+    服务端生成 annotationSetId，固定绑定原始 Series。
+    完整快照由 DICOM SEG 和 JSON 一起提交；不包含服务器端分割算法接口。
+    鉴权复用团队已有系统，联调时补充实际部署所用的安全配置。
+servers:
+  - url: http://localhost:8080
+    description: 联调地址示例，需要替换为团队实际服务地址
+tags:
+  - name: Health
+  - name: DICOM import
+  - name: Annotation
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      tags: [Health]
+      summary: 检查业务与 DICOM 服务状态
+      responses:
+        '200':
+          description: 服务可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: 依赖不可用，status 为 degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/dicom/imports:
+    post:
+      operationId: createDicomImport
+      tags: [DICOM import]
+      summary: 上传一批原始 DICOM 并创建入库任务
+      description: |
+        相同名字 files 字段重复提交。P0 不支持 ZIP。按 DICOM UID 分组。
+        相同 SOP UID 且文件哈希一致为 duplicate，不同内容为文件级 UID_CONTENT_CONFLICT。
+        若直接使用 STOW-RS，可不实现此门面与对应任务查询。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    format: binary
+            encoding:
+              files:
+                contentType: application/dicom
+      responses:
+        '202':
+          description: 已接收，使用 importId 轮询状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportTask'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/v1/dicom/imports/{importId}:
+    parameters:
+      - name: importId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getDicomImport
+      tags: [DICOM import]
+      summary: 查询导入进度及文件级结果
+      responses:
+        '200':
+          description: 即使任务失败也返回任务对象；失败原因位于 files / error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportTask'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/annotation-sets:
+    get:
+      operationId: listAnnotationSets
+      tags: [Annotation]
+      summary: 按原始序列查询标注集
+      parameters:
+        - name: studyInstanceUID
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/DicomUID'
+        - name: seriesInstanceUID
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/DicomUID'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 同一序列可有多个标注集；无结果返回空 items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnnotationSummary'
+                  nextCursor:
+                    type: string
+                    nullable: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      operationId: createAnnotationSet
+      tags: [Annotation]
+      summary: 创建绑定原始 Series 的空草稿
+      description: |
+        revision 为 0，snapshot 与 artifact 为 null。
+        source 由服务器从已入库原始序列确定，后续不能换源。
+        空间不规则的序列可创建切片级草稿，source.reconstructable 为 false。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studyInstanceUID, seriesInstanceUID, label]
+              additionalProperties: false
+              properties:
+                studyInstanceUID:
+                  $ref: '#/components/schemas/DicomUID'
+                seriesInstanceUID:
+                  $ref: '#/components/schemas/DicomUID'
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+            example:
+              studyInstanceUID: '2.25.10001'
+              seriesInstanceUID: '2.25.10002'
+              label: 骨组织标注
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnotationSet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/InvalidSegmentation'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/v1/annotation-sets/{annotationSetId}:
+    parameters:
+      - $ref: '#/components/parameters/AnnotationSetId'
+    get:
+      operationId: getAnnotationSet
+      tags: [Annotation]
+      summary: 获取当前已提交的完整快照及固定源数据
+      responses:
+        '200':
+          description: artifact.url 指向固定 revision，下一次保存使用外层 revision 作为 baseRevision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnotationSet'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/annotation-sets/{annotationSetId}/snapshot:
+    parameters:
+      - $ref: '#/components/parameters/AnnotationSetId'
+    put:
+      operationId: saveAnnotationSnapshot
+      tags: [Annotation]
+      summary: 原子保存全量标注快照
+      description: |
+        metadata 必须为 application/json，segmentation 为 application/dicom 文件。
+        contentKind=dicom-seg 必须有 SEG 文件且至少一个非空 Mask；empty 时禁止带 SEG，所有 dicomSegmentNumber 为 null。
+        SEG 可省略没有选区的源帧，恢复时其余源帧是背景；非空段编号必须与 JSON 映射一一对应。
+        同一个 Idempotency-Key 和相同请求重试返回原成功结果，不生成新版本。
+        幂等判断先于 baseRevision 校验，key 至少保留 24 小时。
+        文件落盘成功与元数据发布必须作为完整快照提交；失败保留旧版本。
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          description: 一次逻辑保存请求的唯一值，重试复用，新的保存使用新值
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [metadata]
+              properties:
+                metadata:
+                  allOf:
+                    - $ref: '#/components/schemas/SnapshotMetadata'
+                    - type: object
+                      nullable: false
+                segmentation:
+                  type: string
+                  format: binary
+                  description: 仅 contentKind=dicom-seg 时必填；完整二值 DICOM SEG
+            encoding:
+              metadata:
+                contentType: application/json
+              segmentation:
+                contentType: application/dicom
+      responses:
+        '200':
+          description: 已完整持久化，revision 原子递增；幂等重试返回原保存版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnotationSet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: REVISION_CONFLICT 或 IDEMPOTENCY_KEY_REUSED；未修改当前快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/InvalidSegmentation'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/v1/annotation-sets/{annotationSetId}/revisions/{revision}/segmentation:
+    parameters:
+      - $ref: '#/components/parameters/AnnotationSetId'
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: downloadAnnotationSegmentation
+      tags: [Annotation]
+      summary: 下载某个已提交版本的 DICOM SEG
+      description: |
+        内容不可随更新变动，文件字节的 SHA-256 必须等于 artifact.sha256。
+        空快照返回 404 EMPTY_SNAPSHOT，不回退到上一版文件。
+      responses:
+        '200':
+          description: 完整 DICOM Part 10 SEG 文件
+          content:
+            application/dicom:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  parameters:
+    AnnotationSetId:
+      name: annotationSetId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  schemas:
+    DicomUID:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[0-9]+(\.[0-9]+)*$'
+      description: DICOM UID；后端仍需按 DICOM 标准完整校验
+    Health:
+      type: object
+      required: [status, version, dicomAvailable]
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        version:
+          type: string
+        dicomAvailable:
+          type: boolean
+    ImportTask:
+      type: object
+      required: [importId, status, totalFiles, processedFiles, series, files]
+      properties:
+        importId:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, completed, partial, failed]
+        totalFiles:
+          type: integer
+          minimum: 1
+        processedFiles:
+          type: integer
+          minimum: 0
+        series:
+          type: array
+          description: 已成功入库并可通过 DICOMweb 查询的原始序列
+          items:
+            type: object
+            required: [studyInstanceUID, seriesInstanceUID, instanceCount]
+            properties:
+              studyInstanceUID:
+                $ref: '#/components/schemas/DicomUID'
+              seriesInstanceUID:
+                $ref: '#/components/schemas/DicomUID'
+              instanceCount:
+                type: integer
+                minimum: 1
+                description: 本任务成功处理的实例数，包含幂等重复实例
+        files:
+          type: array
+          description: 已处理文件的结果，处理结束时每个输入文件均有一条
+          items:
+            type: object
+            required: [fileIndex, fileName, status]
+            properties:
+              fileIndex:
+                type: integer
+                minimum: 0
+              fileName:
+                type: string
+              status:
+                type: string
+                enum: [imported, duplicate, rejected]
+              sopInstanceUID:
+                $ref: '#/components/schemas/DicomUID'
+              error:
+                $ref: '#/components/schemas/ApiError'
+        error:
+          $ref: '#/components/schemas/ApiError'
+    SourceFrame:
+      type: object
+      required: [index, sopInstanceUID, frameNumber]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: 几何排序后的零基索引，必须连续
+        sopInstanceUID:
+          $ref: '#/components/schemas/DicomUID'
+        frameNumber:
+          type: integer
+          minimum: 1
+          description: DICOM 帧号；P0 单帧实例固定为 1
+    Source:
+      type: object
+      required:
+        - studyInstanceUID
+        - seriesInstanceUID
+        - frameOfReferenceUID
+        - fingerprint
+        - coordinateSystem
+        - dimensions
+        - spacing
+        - origin
+        - direction
+        - reconstructable
+        - frames
+      properties:
+        studyInstanceUID:
+          $ref: '#/components/schemas/DicomUID'
+        seriesInstanceUID:
+          $ref: '#/components/schemas/DicomUID'
+        frameOfReferenceUID:
+          $ref: '#/components/schemas/DicomUID'
+        fingerprint:
+          type: string
+          minLength: 1
+          description: 服务端生成的不可变源数据指纹，客户端原样带回
+        coordinateSystem:
+          type: string
+          enum: [LPS]
+        dimensions:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: integer
+            minimum: 1
+          description: columns、rows、slices；frames.length 必须等于 slices
+        spacing:
+          type: array
+          nullable: true
+          minItems: 3
+          maxItems: 3
+          items:
+            type: number
+            minimum: 0
+            exclusiveMinimum: true
+          description: x、y、z 的体素间距，单位 mm；不可重建时为 null
+        origin:
+          type: array
+          nullable: true
+          minItems: 3
+          maxItems: 3
+          items:
+            type: number
+          description: 首体素中心的 LPS 坐标，mm；不可重建时为 null
+        direction:
+          type: array
+          nullable: true
+          minItems: 9
+          maxItems: 9
+          items:
+            type: number
+          description: x、y、z 三根索引轴在 LPS 中的单位向量依次展平；不可重建时为 null
+        reconstructable:
+          type: boolean
+        frames:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SourceFrame'
+    Segment:
+      type: object
+      additionalProperties: false
+      required: [segmentIndex, dicomSegmentNumber, label, color, visible, locked]
+      properties:
+        segmentIndex:
+          type: integer
+          minimum: 1
+          maximum: 254
+          description: 应用内标签值；0 背景，255 临时预览，禁止保存这两个标签
+        dicomSegmentNumber:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 65535
+          description: SEG 的 SegmentNumber，与应用标签显式映射；空 Mask 为 null
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        color:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: integer
+            minimum: 0
+            maximum: 255
+          description: 精确 RGBA，恢复时优先于 SEG 的 CIELab 转换色
+        visible:
+          type: boolean
+        locked:
+          type: boolean
+    SnapshotMetadata:
+      type: object
+      nullable: true
+      additionalProperties: false
+      description: |
+        整份快照元数据。保存请求中必须非 null；revision=0 的资源响应中为 null。
+        资源响应中的 baseRevision 是该已保存快照的父版本，下一次保存必须改用外层 revision。
+        segmentIndex 不重复；非 null dicomSegmentNumber 不重复且与 SEG 段一一对应。
+      required:
+        [schemaVersion, baseRevision, sourceFingerprint, contentKind, label, status, segments]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        baseRevision:
+          type: integer
+          minimum: 0
+        sourceFingerprint:
+          type: string
+          minLength: 1
+        contentKind:
+          type: string
+          enum: [dicom-seg, empty]
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        status:
+          type: string
+          enum: [draft, completed]
+        segments:
+          type: array
+          maxItems: 254
+          items:
+            $ref: '#/components/schemas/Segment'
+    Artifact:
+      type: object
+      nullable: true
+      description: 创建时或 empty 快照时为 null，否则必须存在且指向不可变版本
+      required: [url, mediaType, sha256, sizeBytes]
+      properties:
+        url:
+          type: string
+          description: 同源版本文件路径或可访问的完整 URL；不得指向可变 latest
+        mediaType:
+          type: string
+          enum: [application/dicom]
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+    AnnotationSet:
+      type: object
+      required: [id, label, status, revision, createdAt, updatedAt, source, snapshot, artifact]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        status:
+          type: string
+          enum: [draft, completed]
+        revision:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        source:
+          $ref: '#/components/schemas/Source'
+        snapshot:
+          $ref: '#/components/schemas/SnapshotMetadata'
+        artifact:
+          $ref: '#/components/schemas/Artifact'
+    AnnotationSummary:
+      type: object
+      required: [id, label, status, revision, studyInstanceUID, seriesInstanceUID, updatedAt]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        status:
+          type: string
+          enum: [draft, completed]
+        revision:
+          type: integer
+          minimum: 0
+        studyInstanceUID:
+          $ref: '#/components/schemas/DicomUID'
+        seriesInstanceUID:
+          $ref: '#/components/schemas/DicomUID'
+        updatedAt:
+          type: string
+          format: date-time
+    ApiError:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
+        currentRevision:
+          type: integer
+          minimum: 0
+          description: REVISION_CONFLICT 时必填
+        details:
+          type: array
+          items:
+            type: object
+            required: [message]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/ApiError'
+  responses:
+    BadRequest:
+      description: INVALID_ARGUMENT，字段缺失或请求结构错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: NOT_FOUND 或 EMPTY_SNAPSHOT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooLarge:
+      description: PAYLOAD_TOO_LARGE，上传大小超过服务公布的限制
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnsupportedMediaType:
+      description: UNSUPPORTED_MEDIA_TYPE
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InvalidSegmentation:
+      description: SOURCE_MISMATCH、INVALID_SEGMENTATION 或 UNSUPPORTED_GEOMETRY
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unavailable:
+      description: DICOM_SERVICE_UNAVAILABLE 或 STORAGE_UNAVAILABLE；保存失败不发布新快照
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

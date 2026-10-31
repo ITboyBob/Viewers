@@ -493,3 +493,42 @@ test('an old preview token cannot discard or apply a newer analysis', async () =
   await assert.rejects(f.commands.applyMaskSplit({ previewId: first.preview.id }), /失效/);
   assert.equal((await f.commands.applyMaskSplit({ previewId: second.preview.id })).applied, true);
 });
+
+test('whole-series filling applies each slice and restores all slices in one undo', async () => {
+  const ring = [1, 1, 1, 1, 0, 1, 1, 1, 1];
+  const f = setup([ring, ring]);
+  for (const id of ['label-0', 'label-1']) Object.assign(images.get(id), { columns: 3, rows: 3 });
+  assert.equal((await f.commands.fillMaskHolesSeries()).changed, 2);
+  assert.equal(f.pixels[0][4], 1);
+  assert.equal(f.pixels[1][4], 1);
+  assert.equal(history.length, 1);
+  history[0].restoreMemo(true);
+  assert.equal(f.pixels[0][4], 0);
+  assert.equal(f.pixels[1][4], 0);
+  history[0].restoreMemo(false);
+  assert.equal(f.pixels[0][4], 1);
+  assert.equal(f.pixels[1][4], 1);
+});
+
+test('whole-series filling preserves a different mask inside a closed boundary', async () => {
+  const f = setup([
+    [1, 1, 1, 1, 2, 1, 1, 1, 1],
+    [1, 1, 1, 1, 0, 1, 1, 1, 1],
+  ]);
+  for (const id of ['label-0', 'label-1']) Object.assign(images.get(id), { columns: 3, rows: 3 });
+  assert.equal((await f.commands.fillMaskHolesSeries()).changed, 1);
+  assert.equal(f.pixels[0][4], 2);
+});
+
+test('whole-series filling rolls back earlier slices if the mask becomes locked', async () => {
+  const ring = [1, 1, 1, 1, 0, 1, 1, 1, 1];
+  const f = setup([ring, ring]);
+  for (const id of ['label-0', 'label-1']) Object.assign(images.get(id), { columns: 3, rows: 3 });
+  f.onWrite = () => {
+    f.locked = true;
+  };
+  await assert.rejects(f.commands.fillMaskHolesSeries(), /锁定/);
+  assert.equal(f.pixels[0][4], 0);
+  assert.equal(f.pixels[1][4], 0);
+  assert.equal(history.length, 0);
+});
