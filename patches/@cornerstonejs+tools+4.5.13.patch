@@ -1,0 +1,178 @@
+diff --git a/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/segmentIndex.js b/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/segmentIndex.js
+--- a/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/segmentIndex.js
++++ b/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/segmentIndex.js
+@@ -42,7 +42,9 @@
+     });
+     viewportIds.forEach((viewportId) => {
+         const toolGroup = getToolGroupForViewport(viewportId);
+-        invalidateBrushCursor(toolGroup.id);
++        if (toolGroup) {
++            invalidateBrushCursor(toolGroup.id);
++        }
+     });
+ }
+ export { setActiveSegmentIndex, getActiveSegmentIndex };
+diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/LabelmapBaseTool.js b/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/LabelmapBaseTool.js
+--- a/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/LabelmapBaseTool.js
++++ b/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/LabelmapBaseTool.js
+@@ -14,6 +14,7 @@
+ import { isPointInsidePolyline3D } from '../../utilities/math/polyline';
+ import { triggerSegmentationDataModified } from '../../stateManagement/segmentation/triggerSegmentationEvents';
+ import { fillInsideCircle } from './strategies';
++import getOrCreateSegmentationVolume from '../../utilities/segmentation/getOrCreateSegmentationVolume';
+ export default class LabelmapBaseTool extends BaseTool {
+     static { this.previewData = {
+         preview: null,
+@@ -83,6 +84,7 @@
+     }
+     createEditData(element) {
+         const enabledElement = getEnabledElement(element);
++        if (!enabledElement) return null;
+         const { viewport } = enabledElement;
+         const activeSegmentation = getActiveSegmentation(viewport.id);
+         if (!activeSegmentation) {
+@@ -108,41 +110,33 @@
+         return editData;
+     }
+     getEditData({ viewport, representationData, segmentsLocked, segmentationId, }) {
++        const labelmap = representationData?.[SegmentationRepresentations.Labelmap];
++        if (!labelmap) return null;
+         if (viewport instanceof BaseVolumeViewport) {
+-            const { volumeId } = representationData[SegmentationRepresentations.Labelmap];
+-            const actors = viewport.getActors();
+-            const isStackViewport = viewport instanceof StackViewport;
+-            if (isStackViewport) {
+-                const event = new CustomEvent(Enums.Events.ERROR_EVENT, {
+-                    detail: {
+-                        type: 'Segmentation',
+-                        message: 'Cannot perform brush operation on the selected viewport',
+-                    },
+-                    cancelable: true,
+-                });
+-                eventTarget.dispatchEvent(event);
+-                return null;
+-            }
+-            const volumes = actors.map((actorEntry) => cache.getVolume(actorEntry.referencedId));
+-            const segmentationVolume = cache.getVolume(volumeId);
+-            const referencedVolumeIdToThreshold = volumes.find((volume) => csUtils.isEqual(volume.dimensions, segmentationVolume.dimensions))?.volumeId || volumes[0]?.volumeId;
++            const segmentationVolume = labelmap.volumeId
++                ? cache.getVolume(labelmap.volumeId)
++                : labelmap.imageIds?.length > 1 ? getOrCreateSegmentationVolume(segmentationId) : undefined;
++            if (!segmentationVolume) return null;
++            // Segmentation, surface and decoration actors do not all reference volumes.
++            const volumes = viewport.getActors()
++                .filter((entry) => entry.referencedId)
++                .map((entry) => cache.getVolume(entry.referencedId))
++                .filter((volume) => volume && volume.volumeId !== segmentationVolume.volumeId);
++            const defaultVolumeId = viewport.getVolumeId();
++            const defaultVolume = defaultVolumeId ? cache.getVolume(defaultVolumeId) : undefined;
++            const candidates = [defaultVolume, ...volumes]
++                .filter((volume) => volume && volume.volumeId !== segmentationVolume.volumeId);
++            const referenceVolume = candidates.find((volume) => csUtils.isEqual(volume.dimensions, segmentationVolume.dimensions)) || candidates[0];
++            if (!referenceVolume) return null;
+             return {
+-                volumeId,
+-                referencedVolumeId: this.configuration.threshold?.volumeId ??
+-                    referencedVolumeIdToThreshold,
++                volumeId: segmentationVolume.volumeId,
++                referencedVolumeId: this.configuration.threshold?.volumeId ?? referenceVolume.volumeId,
+                 segmentsLocked,
+             };
+         }
+-        else {
+-            const segmentationImageId = getCurrentLabelmapImageIdForViewport(viewport.id, segmentationId);
+-            if (!segmentationImageId) {
+-                return;
+-            }
+-            return {
+-                imageId: segmentationImageId,
+-                segmentsLocked,
+-            };
+-        }
++        const segmentationImageId = getCurrentLabelmapImageIdForViewport(viewport.id, segmentationId);
++        if (!segmentationImageId) return null;
++        return { imageId: segmentationImageId, segmentsLocked };
+     }
+     createHoverData(element, centerCanvas) {
+         const enabledElement = getEnabledElement(element);
+@@ -192,6 +186,7 @@
+     }
+     getOperationData(element) {
+         const editData = this._editData || this.createEditData(element);
++        if (!editData || !getEnabledElement(element)) return;
+         const { segmentIndex, segmentationId, brushCursor } = this._hoverData || this.createHoverData(element);
+         const { data, metadata = {} } = brushCursor || {};
+         const { viewPlaneNormal, viewUp } = metadata;
+@@ -243,14 +238,30 @@
+         return results;
+     }
+     rejectPreview(element = this._previewData.element) {
+-        if (!element) {
++        // Preview state is shared, but its memo belongs to one tool instance.
++        // Inactive tools from another group must leave it for that owner to reject.
++        const pendingMemo = this._previewData.preview?.memo;
++        if (pendingMemo && this.memo !== pendingMemo && !Array.from(this.memoMap.values()).includes(pendingMemo)) return;
++        if (this._previewData.timer) {
++            window.clearTimeout(this._previewData.timer);
++            this._previewData.timer = null;
++        }
++        this.doneEditMemo();
++        if (!this.hasPreviewData()) {
++            this._previewData.isDrag = false;
+             return;
+         }
+-        this.doneEditMemo();
+         const enabledElement = getEnabledElement(element);
+-        this.applyActiveStrategyCallback(enabledElement, this.getOperationData(element), StrategyCallbacks.RejectPreview);
++        const operationData = enabledElement ? this.getOperationData(element) : undefined;
++        if (operationData) {
++            this.applyActiveStrategyCallback(enabledElement, operationData, StrategyCallbacks.RejectPreview);
++        } else {
++            const previewMemoId = this._previewData.preview?.memo?.id;
++            if (previewMemoId) csUtils.HistoryMemo.DefaultHistoryMemo.undoIf((memo) => memo.id === previewMemoId);
++        }
+         this._previewData.preview = null;
+         this._previewData.isDrag = false;
++        this._previewData.element = null;
+     }
+     acceptPreview(element = this._previewData.element) {
+         if (!element) {
+diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/BrushTool.js b/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/BrushTool.js
+--- a/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/BrushTool.js
++++ b/node_modules/@cornerstonejs/tools/dist/esm/tools/segmentation/BrushTool.js
+@@ -96,6 +96,7 @@
+             const enabledElement = getEnabledElement(element);
+             const { viewport } = enabledElement;
+             this._editData = this.createEditData(element);
++            if (!this._editData) return false;
+             this._activateDraw(element);
+             hideElementCursor(element);
+             evt.preventDefault();
+@@ -170,7 +171,7 @@
+                 viewport,
+                 strategy: activeStrategy,
+             });
+-            if (!operationData) {
++            if (!operationData || !strategyData) {
+                 return;
+             }
+             const memo = this.createMemo(operationData.segmentationId, strategyData.segmentationVoxelManager);
+@@ -336,17 +337,7 @@
+         return stats;
+     }
+     rejectPreview(element = this._previewData.element) {
+-        if (!element) {
+-            return;
+-        }
+-        this.doneEditMemo();
+-        const enabledElement = getEnabledElement(element);
+-        if (!enabledElement) {
+-            return;
+-        }
+-        this.applyActiveStrategyCallback(enabledElement, this.getOperationData(element), StrategyCallbacks.RejectPreview);
+-        this._previewData.preview = null;
+-        this._previewData.isDrag = false;
++        super.rejectPreview(element);
+     }
+     acceptPreview(element = this._previewData.element) {
+         if (!element) {

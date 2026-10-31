@@ -47,6 +47,7 @@ import * as polySeg from '@cornerstonejs/polymorphic-segmentation';
 
 import CalibrationLineTool from './tools/CalibrationLineTool';
 import ImageOverlayViewerTool from './tools/ImageOverlayViewerTool';
+import MaskRegionGrowTool from './tools/MaskRegionGrowTool';
 
 export default function initCornerstoneTools(configuration = {}) {
   CrosshairsTool.isAnnotation = false;
@@ -90,6 +91,7 @@ export default function initCornerstoneTools(configuration = {}) {
   addTool(SphereScissorsTool);
   addTool(CircleScissorsTool);
   addTool(BrushTool);
+  addTool(MaskRegionGrowTool);
   addTool(PaintFillTool);
   addTool(ReferenceLinesTool);
   addTool(CalibrationLineTool);

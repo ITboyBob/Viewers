@@ -40,6 +40,13 @@ import { updateSegmentBidirectionalStats } from './utils/updateSegmentationStats
 import { generateSegmentationCSVReport } from './utils/generateSegmentationCSVReport';
 import { getUpdatedViewportsForSegmentation } from './utils/hydrationUtils';
 import { SegmentationRepresentations } from '@cornerstonejs/tools/enums';
+import createMaskCommands from './utils/maskEditing/createMaskCommands';
+import createVolumeMaskCommands from './utils/maskEditing/createVolumeMaskCommands';
+import {
+  getCircleTool,
+  isSphereTool,
+  supportsSphereTools,
+} from './utils/maskEditing/sphereToolSupport';
 
 const { DefaultHistoryMemo } = csUtils.HistoryMemo;
 const toggleSyncFunctions = {
@@ -118,6 +125,7 @@ function commandsModule({
     syncGroupService,
     segmentationService,
     displaySetService,
+    toolbarService,
   } = servicesManager.services as AppTypes.Services;
 
   function _getActiveViewportEnabledElement() {
@@ -146,6 +154,8 @@ function commandsModule({
   }
 
   const actions = {
+    ...createMaskCommands({ servicesManager, commandsManager }),
+    ...createVolumeMaskCommands({ servicesManager, commandsManager }),
     jumpToMeasurementViewport: ({ annotationUID, measurement }) => {
       cornerstoneTools.annotation.selection.setAnnotationSelected(annotationUID, true);
       const { metadata } = measurement;
@@ -957,13 +967,75 @@ function commandsModule({
         return;
       }
 
+      const canUseSphere = () => {
+        const attachedViewports = toolGroup.getViewportsInfo();
+        // Labelmap tools share preview state across groups. An unmounted group
+        // must check the active image too, rather than accepting an empty list.
+        const checkedViewports = attachedViewports.length
+          ? attachedViewports
+          : [{ viewportId: viewportGridService.getActiveViewportId() }];
+        return checkedViewports.every(({ viewportId }) => {
+          const viewport = cornerstoneViewportService.getCornerstoneViewport(viewportId);
+          if (!(viewport instanceof StackViewport || viewport instanceof BaseVolumeViewport)) {
+            return false;
+          }
+          const displaySetId = viewportGridService.getDisplaySetsUIDsForViewport(viewportId)?.[0];
+          const displaySet = displaySetId && displaySetService.getDisplaySetByUID(displaySetId);
+          return supportsSphereTools(
+            viewport.getImageIds(),
+            displaySet ? displaySet.isReconstructable : undefined,
+            csUtils.isValidVolume
+          );
+        });
+      };
+
+      if (isSphereTool(toolName) && !canUseSphere()) {
+        toolName = getCircleTool(toolName);
+        const isActiveGroup = toolGroup
+          .getViewportsInfo()
+          .some(({ viewportId }) => viewportId === viewportGridService.getActiveViewportId());
+        if (isActiveGroup) {
+          // Keep the Shape selector consistent with the tool that is actually active.
+          ['Brush', 'Eraser', 'Threshold', 'Shapes'].forEach(buttonId => {
+            const options = toolbarService.getButtonProps(buttonId)?.options;
+            if (Array.isArray(options)) {
+              options.forEach(option => {
+                if (typeof option.value === 'string' && isSphereTool(option.value)) {
+                  option.value = getCircleTool(option.value);
+                }
+              });
+            }
+          });
+          uiNotificationService.show({
+            title: '已切换为 Circle 圆形工具',
+            message:
+              'Sphere 球形工具需要完整且可重建的三维序列。当前影像无法重建，已保留二维编辑；请一次导入同一序列的完整 DICOM 切片后再使用 Sphere。',
+            type: 'info',
+          });
+        }
+      }
+
       const activeToolName = toolGroup.getActivePrimaryMouseButtonTool();
 
       if (activeToolName) {
         const activeToolOptions = toolGroup.getToolConfiguration(activeToolName);
-        activeToolOptions?.disableOnPassive
-          ? toolGroup.setToolDisabled(activeToolName)
-          : toolGroup.setToolPassive(activeToolName);
+        try {
+          activeToolOptions?.disableOnPassive
+            ? toolGroup.setToolDisabled(activeToolName)
+            : toolGroup.setToolPassive(activeToolName);
+        } catch (error) {
+          // A previously valid sphere tool can lose its volume when the series changes.
+          // Cornerstone changes the mode before its preview cleanup runs; allow a safe
+          // replacement only for this known geometry failure, without hiding other errors.
+          if (
+            !isSphereTool(activeToolName) ||
+            canUseSphere() ||
+            !(error instanceof Error) ||
+            error.message !== 'Volume is not reconstructable for sphere manipulation'
+          ) {
+            throw error;
+          }
+        }
       }
 
       // Set the new toolName to be active
@@ -2493,6 +2565,15 @@ function commandsModule({
     interpolateScrollForMarkerLabelmap: actions.interpolateScrollForMarkerLabelmap,
     clearMarkersForMarkerLabelmap: actions.clearMarkersForMarkerLabelmap,
     setBrushSize: actions.setBrushSize,
+    thresholdMaskSlice: actions.thresholdMaskSlice,
+    thresholdMaskSeries: actions.thresholdMaskSeries,
+    growMaskFromSeed: actions.growMaskFromSeed,
+    analyzeMaskSplit: actions.analyzeMaskSplit,
+    applyMaskSplit: actions.applyMaskSplit,
+    locateMaskSplitRegion: actions.locateMaskSplitRegion,
+    discardMaskSplitPreview: actions.discardMaskSplitPreview,
+    fillMaskHoles: actions.fillMaskHoles,
+    splitMaskComponents: actions.splitMaskComponents,
     setThresholdRange: actions.setThresholdRange,
     increaseBrushSize: actions.increaseBrushSize,
     decreaseBrushSize: actions.decreaseBrushSize,

@@ -1191,7 +1191,8 @@ class SegmentationService extends PubSubService {
       : this.getViewportIdsWithSegmentation(segmentationId);
 
     viewportIds.forEach(viewportId => {
-      const { viewport } = getEnabledElementByViewportId(viewportId);
+      const viewport = getEnabledElementByViewportId(viewportId)?.viewport;
+      if (!viewport) return;
       viewport.jumpToWorld(world);
 
       highlightSegment &&
@@ -1231,6 +1232,7 @@ class SegmentationService extends PubSubService {
       });
 
       const representation = segmentationRepresentation[0];
+      if (!representation) return;
       const { type } = representation;
       const segments = csSegmentation.segments;
 

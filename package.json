@@ -23,6 +23,15 @@
     "yarn": ">=1.20.0"
   },
   "scripts": {
+    "demo:data": "node .scripts/generate-mask-demo.cjs",
+    "test:mask-ui": "node .scripts/verify-mask-ui.cjs",
+    "test:mask-sphere": "node .scripts/verify-sphere-tools.cjs",
+    "test:mask-selection": "node .scripts/verify-segment-selection.cjs",
+    "test:mask-volume": "node .scripts/verify-volume-mask.cjs",
+    "test:mask-mpr-brushes": "node .scripts/verify-mpr-brushes.cjs",
+    "test:mask-split-volume": "node .scripts/verify-volume-split.cjs",
+    "dev:mask": "cross-env APP_CONFIG=config/mask-demo.js yarn dev",
+    "test:mask-editing": "node --experimental-strip-types --test .scripts/tests/mask-editing.test.cjs .scripts/tests/mask-commands.test.cjs .scripts/tests/sphere-tool-support.test.cjs .scripts/tests/volume-mask.test.cjs .scripts/tests/volume-commands.test.cjs",
     "cm": "npx git-cz",
     "build": "lerna run build:viewer --stream",
     "build:dev": "lerna run build:dev --stream",
@@ -47,6 +56,7 @@
     "orthanc:up": "docker compose -f platform/app/.recipes/Nginx-Orthanc/docker-compose.yml up",
     "install:dev": "cp -f yarn.lock addOns/yarn.lock && cd addOns && yarn install --modules-folder ../node_modules",
     "preinstall": "node preinstall.js",
+    "postinstall": "patch-package --error-on-fail",
     "start": "yarn run dev",
     "test": "yarn run test:unit",
     "test:data": "git submodule update --init -f testdata",

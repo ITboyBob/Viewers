@@ -94,6 +94,12 @@ module.exports = (env, argv, { SRC_DIR, ENTRY }) => {
     },
     cache: {
       type: 'filesystem',
+      // A patched dependency keeps its package version, so it must invalidate
+      // Webpack's otherwise immutable node_modules cache explicitly.
+      version: 'mask-tools-labelmap-edit-data-v3',
+      buildDependencies: {
+        config: [__filename, path.resolve(__dirname, '../patches/@cornerstonejs+tools+4.5.13.patch')],
+      },
     },
     module: {
       noParse: [/(dicomicc)/],

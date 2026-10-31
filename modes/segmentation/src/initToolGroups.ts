@@ -28,6 +28,12 @@ function createTools({ utilityModule, commandsManager }) {
     ],
     passive: [
       {
+        toolName: 'MaskRegionGrow',
+        configuration: {
+          onSeed: options => commandsManager.run('growMaskFromSeed', options),
+        },
+      },
+      {
         toolName: 'CircularBrush',
         parentTool: 'Brush',
         configuration: {
@@ -69,6 +75,7 @@ function createTools({ utilityModule, commandsManager }) {
         parentTool: 'Brush',
         configuration: {
           activeStrategy: 'THRESHOLD_INSIDE_CIRCLE',
+          threshold: { isDynamic: false, dynamicRadius: 0, range: [50, 600] },
         },
       },
       {
@@ -76,6 +83,7 @@ function createTools({ utilityModule, commandsManager }) {
         parentTool: 'Brush',
         configuration: {
           activeStrategy: 'THRESHOLD_INSIDE_SPHERE',
+          threshold: { isDynamic: false, dynamicRadius: 0, range: [50, 600] },
         },
       },
       {

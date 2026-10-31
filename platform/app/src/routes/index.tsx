@@ -77,6 +77,10 @@ const bakedInRoutes = [
     path: `/localbasic`,
     children: Local.bind(null, { modePath: 'viewer/dicomlocal' }),
   },
+  {
+    path: `/local-mask`,
+    children: Local.bind(null, { modePath: 'segmentation/dicomlocal' }),
+  },
 ];
 
 // NOT FOUND (404)

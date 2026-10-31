@@ -4,6 +4,7 @@ import { Toolbox } from '@ohif/extension-default';
 import PanelSegmentation from './panels/PanelSegmentation';
 import ActiveViewportWindowLevel from './components/ActiveViewportWindowLevel';
 import PanelMeasurement from './panels/PanelMeasurement';
+import MaskEditingTools from './panels/MaskEditingTools';
 
 const getPanelModule = ({ commandsManager, servicesManager, extensionManager }: withAppTypes) => {
   const wrappedPanelSegmentation = ({ configuration }) => {
@@ -41,6 +42,7 @@ const getPanelModule = ({ commandsManager, servicesManager, extensionManager }: 
           buttonSectionId={toolbarService.sections.segmentationToolbox}
           title="Segmentation Tools"
         />
+        <MaskEditingTools />
         <PanelSegmentation
           commandsManager={commandsManager}
           servicesManager={servicesManager}

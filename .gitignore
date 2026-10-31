@@ -1,5 +1,6 @@
 # Packages
 node_modules
+.cache/
 .cursor/
 .nyc_output/
 # Output

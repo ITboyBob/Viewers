@@ -600,7 +600,8 @@ const toolbarButtons: Button[] = [
     uiType: 'ohif.toolBoxButton',
     props: {
       icon: 'icon-tool-threshold',
-      label: 'Threshold Tool',
+      label: 'Threshold Brush',
+      tooltip: '局部阈值笔刷。整组自动选区请使用下方 Mask 编辑中的“应用阈值到整组切片”。',
       evaluate: {
         name: 'evaluate.cornerstone.segmentation',
         toolNames: [
