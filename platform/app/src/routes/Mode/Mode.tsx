@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useLocation } from 'react-router';
 import PropTypes from 'prop-types';
 import { utils } from '@ohif/core';
@@ -439,19 +439,22 @@ export default function ModeRoute({
     sharedGeneration,
   ]);
 
+  // 共享状态提示会更新Mode props；保持组件身份，避免ready/detached重建已加载视口。
+  const ViewportGridWithDataSource = useMemo(
+    () => props => ViewportGrid({ ...props, dataSource }),
+    [dataSource]
+  );
+  const CombinedExtensionsContextProvider = useMemo(
+    () =>
+      ExtensionDependenciesLoaded
+        ? createCombinedContextProvider(extensionManager, servicesManager, commandsManager)
+        : undefined,
+    [ExtensionDependenciesLoaded, extensionManager, servicesManager, commandsManager]
+  );
+
   if (!studyInstanceUIDs || !layoutTemplateData.current || !ExtensionDependenciesLoaded) {
     return null;
   }
-
-  const ViewportGridWithDataSource = props => {
-    return ViewportGrid({ ...props, dataSource });
-  };
-
-  const CombinedExtensionsContextProvider = createCombinedContextProvider(
-    extensionManager,
-    servicesManager,
-    commandsManager
-  );
 
   const getLayoutComponent = props => {
     const layoutTemplateModuleEntry = extensionManager.getModuleEntry(

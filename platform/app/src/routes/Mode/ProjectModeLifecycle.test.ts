@@ -26,7 +26,20 @@ jest.mock(
   }),
   { virtual: true }
 );
-jest.mock('@components/ViewportGrid', () => () => null, { virtual: true });
+const mockGridMount = jest.fn();
+const mockGridUnmount = jest.fn();
+jest.mock(
+  '@components/ViewportGrid',
+  () =>
+    function MockGrid() {
+      jest.requireActual('react').useEffect(() => {
+        mockGridMount();
+        return () => mockGridUnmount();
+      }, []);
+      return null;
+    },
+  { virtual: true }
+);
 jest.mock('../../pluginImports', () => ({ __esModule: true, default: jest.fn() }), {
   virtual: true,
 });
@@ -122,6 +135,43 @@ afterEach(() => {
 function mount() {
   return render(h(MemoryRouter, null, h(ModeRoute, props)));
 }
+test.each([false, true])(
+  '共享ready或detached变化不能重新挂载已初始化native，扩展provider=%s',
+  async withProvider => {
+    props.phaseOneMask = false;
+    props.sharedView = {
+      task_id: 'task',
+      load_generation: 1,
+      study_uids: ['1'],
+      phase: 'active',
+      view_ready: false,
+    };
+    const lifecycle = createModeProjectLifecycle({
+      deactivate: jest.fn(),
+      releaseScope: jest.fn(),
+    });
+    props.servicesManager.services.businessServices.localCollaboration = {
+      sharedView: { getModeLifecycle: () => lifecycle, markViewReady: jest.fn() },
+    };
+    const Layout = ({ ViewportGridComp }) => h(ViewportGridComp);
+    props.extensionManager.getModuleEntry = () => ({ component: Layout });
+    const Provider = ({ children }) => children;
+    if (withProvider) {
+      props.extensionManager.getModulesByType = () => [{ module: [{ provider: Provider }] }];
+    }
+    const view = mount();
+    await waitFor(() => expect(props.mode.onSetupRouteComplete).toHaveBeenCalled());
+    expect(mockGridMount).toHaveBeenCalledTimes(1);
+    for (const change of [{ view_ready: true }, { phase: 'detached' }]) {
+      props = { ...props, sharedView: { ...props.sharedView, ...change } };
+      view.rerender(h(MemoryRouter, null, h(ModeRoute, props)));
+    }
+    expect(mockGridMount).toHaveBeenCalledTimes(1);
+    expect(mockGridUnmount).not.toHaveBeenCalled();
+    view.unmount();
+    expect(mockGridUnmount).toHaveBeenCalledTimes(1);
+  }
+);
 test.each([false, true])(
   '共享Mode只消费本窗Study与独立lifecycle，原生完成前不ready，提前退出=%s',
   async exitEarly => {

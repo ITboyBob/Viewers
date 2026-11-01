@@ -1,0 +1,45 @@
+.remote-cursor-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.remote-cursor-overlay * {
+  pointer-events: none;
+}
+
+.remote-cursor-mark {
+  position: absolute;
+}
+
+.remote-cursor-arrow {
+  position: absolute;
+  width: 20px;
+  height: 24px;
+}
+
+.remote-cursor-label {
+  position: absolute;
+  box-sizing: border-box;
+  height: 22px;
+  max-width: 132px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.remote-cursor-username {
+  display: block;
+  width: max-content;
+  max-width: 120px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

@@ -696,4 +696,77 @@ describe('本地参与协议', () => {
     pair.source.close();
     expect(pair.clock.timers.size).toBe(0);
   });
+
+  it.each(['source', 'viewer'] as const)(
+    '%s在短暂不可用时隐藏，取消排队旧点并在恢复后补发null，不改变view_ready',
+    async role => {
+      const pair = setup();
+      await enter(pair.viewer);
+      const sender = role === 'source' ? pair.source : pair.viewer;
+      const receiver = role === 'source' ? pair.viewer : pair.source;
+      sender.setViewReady(true);
+      sender.sendCursor(cursor);
+      sender.sendCursor({ ...cursor, column: 6 });
+      const start = pair.bus.messages.length;
+      const current = sender.identity.isCurrent;
+      sender.identity.isCurrent = () => false;
+      sender.sendCursor(null);
+      pair.clock.advance(20);
+      expect(
+        pair.bus.messages
+          .slice(start)
+          .filter(message => message.participant_id === sender.identity.participant_id)
+      ).toHaveLength(0);
+      sender.identity.isCurrent = current;
+      pair.clock.advance(1980);
+      const sent = pair.bus.messages
+        .slice(start)
+        .filter(
+          message =>
+            message.participant_id === sender.identity.participant_id && message.kind === 'cursor'
+        );
+      expect({
+        own: sender
+          .getSnapshot()
+          .members.find(member => member.participant_id === sender.identity.participant_id).cursor,
+        remote: receiver
+          .getSnapshot()
+          .members.find(member => member.participant_id === sender.identity.participant_id).cursor,
+        sent,
+      }).toMatchObject({ own: null, remote: null, sent: [{ kind: 'cursor', cursor: null }] });
+      if (role === 'source') {
+        expect(pair.context.getSnapshot().view_ready).toBe(true);
+      }
+      sender.close();
+      receiver.close();
+      expect(pair.clock.timers.size).toBe(0);
+    }
+  );
+
+  it('不可用期间隐藏立即清本地样本，持续暂停不发普通消息，关闭后不复活', async () => {
+    const pair = setup();
+    await enter(pair.viewer);
+    pair.source.setViewReady(true);
+    pair.source.sendCursor(cursor);
+    pair.source.sendCursor({ ...cursor, column: 7 });
+    const start = pair.bus.messages.length;
+    const current = pair.sourceIdentity.isCurrent;
+    pair.sourceIdentity.isCurrent = () => false;
+    pair.source.sendCursor(null);
+    pair.clock.advance(3000);
+    expect(
+      pair.bus.messages.slice(start).filter(message => message.participant_id === 'source')
+    ).toHaveLength(0);
+    expect(pair.source.getSnapshot().members[0].cursor).toBeNull();
+    pair.source.close('identity_invalid');
+    const closedCount = pair.bus.messages.length;
+    pair.sourceIdentity.isCurrent = current;
+    pair.source.sendCursor(cursor);
+    pair.source.sendCursor(null);
+    pair.clock.advance(5000);
+    expect(pair.source.getSnapshot().phase).toBe('closed');
+    expect(pair.viewer.getSnapshot().phase).toBe('closed');
+    expect(pair.bus.messages).toHaveLength(closedCount);
+    expect(pair.clock.timers.size).toBe(0);
+  });
 });

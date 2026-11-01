@@ -678,6 +678,11 @@ export class LocalParticipationService implements LocalParticipationPort {
     }
   }
   sendCursor(cursor: SharedCursorPosition | null) {
+    if (cursor === null && this.snapshot.phase === 'active' && !this.current()) {
+      // 身份复核暂停发送时仍须撤销旧采样，恢复后由心跳路径补发隐藏。
+      this.hideLocalCursor();
+      return;
+    }
     if (
       !this.current() ||
       this.snapshot.phase !== 'active' ||
