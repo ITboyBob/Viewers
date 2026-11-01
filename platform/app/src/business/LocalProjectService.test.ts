@@ -63,6 +63,34 @@ beforeEach(() => {
   });
 });
 const selection = { files: [], kind: 'files' as const };
+test('狭义时间只采纳当前有效project同ID的递增响应，失效同步通知但不清图像', async () => {
+  const p = await service.create(selection);
+  Object.assign(p, { task_id: 'real', updated_at: '2026-11-01T00:00:00Z', phase: 'registered' });
+  const notify = jest.fn(),
+    stop = service.subscribe(notify);
+  expect(service.updateTimestamp(p, { task_id: 'real', updated_at: '2026-11-01T00:00:01Z' })).toBe(
+    true
+  );
+  for (const value of [
+    { task_id: 'other', updated_at: '2026-11-01T00:00:02Z' },
+    { task_id: 'real', updated_at: 'bad' },
+    { task_id: 'real', updated_at: '2026-11-01T00:00:01Z' },
+  ]) {
+    expect(service.updateTimestamp(p, value)).toBe(false);
+  }
+  service.invalidate({ ...p });
+  expect(notify).not.toHaveBeenCalled();
+  service.invalidate(p);
+  expect(notify).toHaveBeenCalledTimes(1);
+  expect(release).not.toHaveBeenCalled();
+  expect(service.updateTimestamp(p, { task_id: 'real', updated_at: '2026-11-01T00:00:02Z' })).toBe(
+    false
+  );
+  stop();
+  service.dispose();
+  expect(notify).toHaveBeenCalledTimes(1);
+  expect(release).toHaveBeenCalledTimes(1);
+});
 test('发起时冻结团队和首次标题，保存全部文件而非展示折叠结果', async () => {
   let finish;
   parse.mockReturnValue(

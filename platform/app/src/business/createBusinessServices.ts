@@ -53,7 +53,7 @@ export function createBusinessServices(
     identityGeneration: () => identityGeneration,
   });
   const tasks = new TaskService(api, localProjects);
-  const projectRuntime = new ProjectRuntimeService(localProjects);
+  const projectRuntime = new ProjectRuntimeService(localProjects, tasks);
   const services: BusinessServices = {
     api,
     session,

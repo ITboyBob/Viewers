@@ -1,5 +1,6 @@
 import { ProjectRuntimeService, createModeProjectLifecycle } from './ProjectRuntimeService';
 import type { LocalProject, LocalProjects } from '@ohif/core';
+import { PubSubService } from '../../../core/src/services/_shared/pubSubServiceInterface';
 let runtime: ProjectRuntimeService, project: LocalProject, dispose: jest.Mock;
 const scope = () => ({ activate: jest.fn(), release: jest.fn() });
 beforeEach(() => {
@@ -94,4 +95,94 @@ test('已经退出后才注册的原生cleanup立即执行，无scope的原生�
   const exit = jest.fn();
   boundary.setNativeExit(exit);
   expect(exit).toHaveBeenCalledTimes(1);
+});
+
+describe('3B真实事件桥接与generation生命周期', () => {
+  let services, touch: jest.Mock, emit: () => void, eligible: boolean, prepared;
+  const flush = async () => {
+    for (let n = 0; n < 30; n++) {
+      await Promise.resolve();
+    }
+  };
+  beforeEach(() => {
+    Object.assign(project, {
+      batch_id: 'b',
+      mode_path: 'segmentation/dicomlocal',
+      importer_uid: 'u',
+      study_uids: ['1'],
+      successes: [],
+      updated_at: '2026-11-01T00:00:00Z',
+    });
+    eligible = true;
+    const projects = {
+      isCurrent: () => eligible,
+      getCurrent: () => project,
+      dispose,
+      updateTimestamp: jest.fn(),
+      subscribe: listener => {
+        emit = listener;
+        return jest.fn();
+      },
+    };
+    touch = jest
+      .fn()
+      .mockResolvedValue({ task_id: project.task_id, updated_at: '2026-11-01T00:00:01Z' });
+    runtime = new ProjectRuntimeService(projects as never, { touch } as never);
+    prepared = { ...scope(), isActive: () => true };
+    runtime.bind(project, prepared);
+    services = {
+      measurementService: new PubSubService({ ADDED: 'measurement' }),
+      segmentationService: new PubSubService({ ADDED: 'segmentation' }),
+      uiNotificationService: { show: jest.fn() },
+    };
+  });
+  const broadcast = () => services.measurementService._broadcastEvent('measurement', {});
+  test('原生或错数据源不启动，当前mask scope才拥有桥接', async () => {
+    runtime.beginMode(services, 'dicomweb');
+    broadcast();
+    expect(touch).not.toHaveBeenCalled();
+    prepared.isActive = () => false;
+    runtime.beginMode(services, 'dicomlocal');
+    broadcast();
+    expect(touch).not.toHaveBeenCalled();
+    prepared.isActive = () => true;
+    runtime.beginMode(services, 'dicomlocal');
+    broadcast();
+    await flush();
+    expect(touch).toHaveBeenCalledTimes(1);
+    runtime.getModeLifecycle().dispose();
+  });
+  test('再次进入只一组订阅，旧generation返回或旧cleanup不能停止新桥接', async () => {
+    let finish;
+    touch.mockReturnValueOnce(
+      new Promise(resolve => {
+        finish = resolve;
+      })
+    );
+    const oldStop = runtime.beginMode(services, 'dicomlocal');
+    broadcast();
+    const oldSignal = touch.mock.calls[0][1];
+    runtime.beginMode(services, 'dicomlocal');
+    expect(oldSignal.aborted).toBe(true);
+    oldStop();
+    finish({ task_id: project.task_id, updated_at: '2026-11-01T00:00:09Z' });
+    broadcast();
+    await flush();
+    expect(touch).toHaveBeenCalledTimes(2);
+    expect(services.measurementService.listeners.measurement).toHaveLength(1);
+    runtime.getModeLifecycle().dispose();
+    expect(services.measurementService.listeners.measurement).toHaveLength(0);
+  });
+  test('身份失效同步中止桥接，但实际退出前保留scope和图像', async () => {
+    runtime.beginMode(services, 'dicomlocal');
+    eligible = false;
+    emit();
+    broadcast();
+    await flush();
+    expect(touch).not.toHaveBeenCalled();
+    expect(prepared.release).not.toHaveBeenCalled();
+    expect(services.measurementService.listeners.measurement).toHaveLength(0);
+    runtime.getModeLifecycle().dispose();
+    expect(prepared.release).toHaveBeenCalledTimes(1);
+  });
 });

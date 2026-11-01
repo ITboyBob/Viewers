@@ -128,12 +128,19 @@ export default function ModeRoute({
   const route = mode.routes?.[0] ?? null;
 
   useEffect(() => {
+    let cancelled = false;
     const loadExtensions = async () => {
       const loadedExtensions = await loadModules(Object.keys(extensions));
+      if (cancelled) {
+        return;
+      }
       for (const extension of loadedExtensions) {
         const { id: extensionId } = extension;
         if (extensionManager.getRegisteredExtensionIds().indexOf(extensionId) === -1) {
           await extensionManager.registerExtension(extension);
+          if (cancelled) {
+            return;
+          }
         }
       }
 
@@ -143,6 +150,9 @@ export default function ModeRoute({
     };
 
     loadExtensions();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -159,16 +169,21 @@ export default function ModeRoute({
     }
 
     // Todo: this should not be here, data source should not care about params
+    let cancelled = false;
     const initializeDataSource = async (params, query) => {
       await dataSource.initialize({
         params,
         query,
       });
+      if (cancelled) {
+        return;
+      }
       setStudyInstanceUIDs(dataSource.getStudyInstanceUIDs({ params, query }));
     };
 
     initializeDataSource(params, query);
     return () => {
+      cancelled = true;
       layoutTemplateData.current = null;
     };
   }, [location, ExtensionDependenciesLoaded]);
@@ -178,6 +193,7 @@ export default function ModeRoute({
       return;
     }
 
+    let cancelled = false;
     const retrieveLayoutData = async () => {
       const layoutData = await route.layoutTemplate({
         location,
@@ -185,7 +201,7 @@ export default function ModeRoute({
         studyInstanceUIDs,
       });
 
-      if (isMounted.current) {
+      if (!cancelled && isMounted.current) {
         const { leftPanels = [], rightPanels = [], ...layoutProps } = layoutData.props;
 
         panelService.reset();
@@ -203,6 +219,7 @@ export default function ModeRoute({
       retrieveLayoutData();
     }
     return () => {
+      cancelled = true;
       layoutTemplateData.current = null;
     };
   }, [studyInstanceUIDs, ExtensionDependenciesLoaded]);
@@ -226,6 +243,13 @@ export default function ModeRoute({
         return;
       }
       values
+        .map(value =>
+          typeof value === 'function'
+            ? value
+            : value && typeof value.unsubscribe === 'function'
+              ? () => value.unsubscribe()
+              : null
+        )
         .filter(value => typeof value === 'function')
         .forEach(unsubscribe => {
           if (exited) {
@@ -236,6 +260,12 @@ export default function ModeRoute({
         });
     };
     const setupRouteInit = async () => {
+      if (phaseOneMask) {
+        servicesManager.services.businessServices?.projectRuntime?.beginMode(
+          servicesManager.services,
+          dataSourceName
+        );
+      }
       // TODO: For some reason this is running before the Providers
       // are calling setServiceImplementation
       // TODO -> iterate through services.
@@ -345,11 +375,7 @@ export default function ModeRoute({
       exited = true;
       // 本期业务先失活由共享边界保证，随后保持原mode→hotkeys→退订→extension次序。
       try {
-        try {
-          mode?.onModeExit?.({ servicesManager, extensionManager, appConfig });
-        } catch (error) {
-          console.warn('mode exit failure', error);
-        }
+        mode?.onModeExit?.({ servicesManager, extensionManager, appConfig });
       } finally {
         try {
           hotkeysManager.destroy();
@@ -370,7 +396,11 @@ export default function ModeRoute({
       })
       .catch(() => {
         if (!exited) {
-          console.warn('mode setup failure');
+          try {
+            lifetime.current.dispose();
+          } finally {
+            console.warn('mode setup failure');
+          }
         }
       });
     return cleanup;
@@ -385,6 +415,7 @@ export default function ModeRoute({
     hotkeysManager,
     studyInstanceUIDs,
     refresh,
+    phaseOneMask,
   ]);
 
   if (!studyInstanceUIDs || !layoutTemplateData.current || !ExtensionDependenciesLoaded) {

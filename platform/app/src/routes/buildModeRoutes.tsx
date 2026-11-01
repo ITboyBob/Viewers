@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useReducer } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAppConfig } from '@state';
 import { requiresBusinessAuth } from '../business/BusinessAuthGate';
@@ -12,6 +12,10 @@ export type ModeRoutesOptions = Omit<ModeRouteProps, 'mode' | 'dataSourceName' |
 function BusinessModeRoute(props: ModeRouteProps) {
   const [config] = useAppConfig();
   const location = useLocation();
+  const projects = props.servicesManager.services.businessServices?.localProjects;
+  const runtime = props.servicesManager.services.businessServices?.projectRuntime;
+  const [, refresh] = useReducer(value => value + 1, 0);
+  useEffect(() => projects?.subscribe(refresh), [projects]);
   const source =
     typeof props.dataSourceName === 'string'
       ? props.dataSourceName
@@ -25,11 +29,23 @@ function BusinessModeRoute(props: ModeRouteProps) {
       location.state,
       props.servicesManager.services.businessServices?.projectRuntime
     );
+  const project = runtime?.getCurrent?.();
   return (
-    <ModeRoute
-      {...props}
-      phaseOneMask={phaseOneMask}
-    />
+    <>
+      {phaseOneMask &&
+        (!project || project.phase === 'invalid' || project.phase === 'disposed') && (
+          <div
+            role="status"
+            className="bg-black px-3 text-white"
+          >
+            当前项目已失效，请重新导入；本页不会恢复先前项目。
+          </div>
+        )}
+      <ModeRoute
+        {...props}
+        phaseOneMask={phaseOneMask}
+      />
+    </>
   );
 }
 

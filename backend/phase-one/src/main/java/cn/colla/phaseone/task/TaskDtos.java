@@ -19,4 +19,6 @@ public final class TaskDtos {
                        Map<String, Object> metadata, Instant created_at, Instant updated_at) {}
     public record Registration(Task task, String payloadHash) {}
     public record RegistrationResult(Task task, boolean created) {}
+    public record TaskTimestamp(String task_id, Instant updated_at) {}
+    public record TouchTarget(String importerUid, Instant updatedAt) {}
 }
