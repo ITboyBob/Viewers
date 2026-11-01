@@ -1,6 +1,7 @@
 /** Local DICOM demo: image data stays in the browser, with no PACS dependency. */
 window.config = {
   name: 'config/mask-demo.js',
+  phaseOneBusiness: { enabled: true },
   routerBasename: '/',
   extensions: [],
   modes: [],

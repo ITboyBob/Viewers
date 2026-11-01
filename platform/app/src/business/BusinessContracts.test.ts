@@ -1,0 +1,23 @@
+import ServicesManager from '../../../core/src/services/ServicesManager';
+import type PublicServices from '../../../core/src/types/Services';
+import type { BusinessServices } from '@ohif/core';
+import type { BusinessServices as TypesExport } from '../../../core/src/types';
+import { businessServicesRegistration } from './createBusinessServices';
+
+test('OHIF用真实描述符工厂注册，并使两个Services类型面共享同一公共实体', () => {
+  const manager = new ServicesManager(undefined);
+  manager.registerService(businessServicesRegistration, { enabled: true });
+  const container = manager.services.businessServices!;
+  const fromRoot: BusinessServices = container;
+  const fromTypes: TypesExport = container;
+  const standalone: Pick<PublicServices, 'businessServices'> = { businessServices: container };
+  const globalServices: Pick<AppTypes.Services, 'businessServices'> = {
+    businessServices: container,
+  };
+  expect(fromRoot).toBe(fromTypes);
+  expect(standalone.businessServices).toBe(globalServices.businessServices);
+  expect(manager.registeredServiceNames).toContain('businessServices');
+  expect(container.session.getSnapshot().status).toBe('unknown');
+  expect(Object.hasOwn(container, 'runtime')).toBe(false);
+  expect(container.projectRuntime).toBeUndefined();
+});

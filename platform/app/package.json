@@ -108,6 +108,9 @@
   "devDependencies": {
     "@babel/plugin-transform-private-methods": "7.27.1",
     "@pmmmwh/react-refresh-webpack-plugin": "0.5.17",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/react": "16.1.0",
+    "@testing-library/user-event": "14.5.2",
     "@types/node": "20.19.9",
     "clean-webpack-plugin": "4.0.0",
     "copy-webpack-plugin": "10.2.4",

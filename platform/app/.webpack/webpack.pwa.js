@@ -52,6 +52,11 @@ const setHeaders = (res, path) => {
 };
 
 module.exports = (env, argv) => {
+  const businessApiProxy = {
+    context: ['/api/v1', '/actuator/health'],
+    target: process.env.COLLA_API_TARGET || 'http://127.0.0.1:8081',
+    changeOrigin: true,
+  };
   const baseConfig = webpackBase(env, argv, { SRC_DIR, DIST_DIR });
   const isProdBuild = process.env.NODE_ENV === 'production';
   const hasProxy = PROXY_TARGET && PROXY_DOMAIN;
@@ -138,15 +143,15 @@ module.exports = (env, argv) => {
       ...(IS_COVERAGE
         ? []
         : [
-          new InjectManifest({
-            swDest: 'sw.js',
-            swSrc: path.join(SRC_DIR, 'service-worker.js'),
-            // Need to exclude the theme as it is updated independently
-            exclude: [/theme/],
-            // Cache large files for the manifests to avoid warning messages
-            maximumFileSizeToCacheInBytes: 1024 * 1024 * 50,
-          }),
-        ]),
+            new InjectManifest({
+              swDest: 'sw.js',
+              swSrc: path.join(SRC_DIR, 'service-worker.js'),
+              // Need to exclude the theme as it is updated independently
+              exclude: [/theme/],
+              // Cache large files for the manifests to avoid warning messages
+              maximumFileSizeToCacheInBytes: 1024 * 1024 * 50,
+            }),
+          ]),
     ],
     // https://webpack.js.org/configuration/dev-server/
     devServer: {
@@ -155,19 +160,19 @@ module.exports = (env, argv) => {
       // compress: true,
       // http2: true,
       // https: true,
-      open: true,
+      open: process.env.OHIF_OPEN !== 'false',
       port: OHIF_PORT,
       client: {
         overlay: { errors: true, warnings: false },
       },
       proxy: [
+        businessApiProxy,
+        { context: ['/dicomweb'], target: 'http://localhost:5000' },
         {
-          '/dicomweb': 'http://localhost:5000',
-          '/dicom-microscopy-viewer': {
-            target: 'http://localhost:3000',
-            pathRewrite: {
-              '^/dicom-microscopy-viewer': `/${PUBLIC_URL}/dicom-microscopy-viewer`,
-            },
+          context: ['/dicom-microscopy-viewer'],
+          target: 'http://localhost:3000',
+          pathRewrite: {
+            '^/dicom-microscopy-viewer': `/${PUBLIC_URL}/dicom-microscopy-viewer`,
           },
         },
       ],
@@ -196,16 +201,17 @@ module.exports = (env, argv) => {
   });
 
   if (hasProxy) {
-    mergedConfig.devServer.proxy = mergedConfig.devServer.proxy || {};
-    mergedConfig.devServer.proxy = {
-      [PROXY_TARGET]: {
+    mergedConfig.devServer.proxy = [
+      businessApiProxy,
+      {
+        context: [PROXY_TARGET],
         target: PROXY_DOMAIN,
         changeOrigin: true,
         pathRewrite: {
           [`^${PROXY_PATH_REWRITE_FROM}`]: PROXY_PATH_REWRITE_TO,
         },
       },
-    };
+    ];
   }
 
   if (isProdBuild) {

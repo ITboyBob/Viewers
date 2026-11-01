@@ -1,3 +1,4 @@
+import type { BusinessConfiguration, BusinessServices } from './BusinessContracts';
 /* eslint-disable @typescript-eslint/no-namespace */
 import HangingProtocolServiceType from '../services/HangingProtocolService';
 import CustomizationServiceType from '../services/CustomizationService';
@@ -64,6 +65,7 @@ declare global {
     }
 
     export interface Services {
+      businessServices?: BusinessServices;
       hangingProtocolService?: HangingProtocolServiceType;
       customizationService?: CustomizationServiceType;
       measurementService?: MeasurementServiceType;
@@ -83,6 +85,7 @@ declare global {
     }
 
     export interface Config {
+      phaseOneBusiness?: BusinessConfiguration;
       studyBrowserMode?: 'all' | 'primary';
       routerBasename?: string;
       customizationService?: CustomizationServiceType;

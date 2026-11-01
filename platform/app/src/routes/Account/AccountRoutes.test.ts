@@ -1,0 +1,172 @@
+import React from 'react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import Login from './Login';
+import Register from './Register';
+import InviteRoute from './InviteRoute';
+import BusinessAuthGate from '../../business/BusinessAuthGate';
+import { createBusinessServices } from '../../business/createBusinessServices';
+import PrivateRoute from '../PrivateRoute';
+
+let mockServices,
+  mockOidc = { enabled: false, user: null };
+jest.mock(
+  '@ohif/core',
+  () => ({
+    useSystem: () => ({ servicesManager: { services: { businessServices: mockServices } } }),
+  }),
+  { virtual: true }
+);
+jest.mock('@ohif/ui-next', () => ({ useUserAuthentication: () => [mockOidc] }), { virtual: true });
+const h = React.createElement;
+const context = {
+  user: { uid: 'u', username: 'user', avatar_url: null },
+  expires_at: '2026-11-02T00:00:00Z',
+  default_team_id: 't',
+  memberships: [{ team_id: 't', name: '团队', owner_uid: 'u', role: 'owner' }],
+};
+const ok = () =>
+  ({
+    ok: true,
+    status: 201,
+    json: async () => ({ data: { ...context, token: 'token' } }),
+  }) as Response;
+const fill = () => {
+  fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'user' } });
+  fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret' } });
+};
+function Location() {
+  return h('div', { 'data-testid': 'route' }, useLocation().pathname);
+}
+function mount(path: string, basename = '/') {
+  return render(
+    h(
+      MemoryRouter,
+      { basename, initialEntries: [basename === '/' ? path : basename + path] },
+      h(Location),
+      h(
+        Routes,
+        null,
+        h(Route, { path: '/account/login', element: h(Login) }),
+        h(Route, { path: '/account/register', element: h(Register) }),
+        h(Route, {
+          path: '/account/invite',
+          element: h(BusinessAuthGate, { enabled: true }, h(InviteRoute)),
+        }),
+        h(Route, { path: '/local-mask', element: h('p', null, '导入目标') })
+      )
+    )
+  );
+}
+beforeEach(() => {
+  sessionStorage.clear();
+  mockServices = createBusinessServices(
+    { enabled: true },
+    { fetch: jest.fn().mockResolvedValue(ok()), storage: sessionStorage }
+  );
+});
+afterEach(() => {
+  cleanup();
+  mockOidc = { enabled: false, user: null };
+});
+
+test.each([
+  ['/account/login', '登录'],
+  ['/account/register', '下一步'],
+])('非空校验、密码类型及%s提交状态', async (path, label) => {
+  mount(path);
+  const button = screen.getByRole('button', { name: label }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  expect(button.dataset.state).toBe('disabled');
+  fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'user' } });
+  expect(button.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret' } });
+  expect(button.disabled).toBe(false);
+  expect(button.dataset.state).toBe('ready');
+  expect(screen.getByLabelText('密码').getAttribute('type')).toBe('password');
+});
+
+test('原注册入口可达，注册成功只到受保护邀请占位，无假完成或发送按钮', async () => {
+  mount('/account/login');
+  fireEvent.click(screen.getByRole('link', { name: '注册' }));
+  await screen.findByRole('heading', { name: '注册' });
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  expect(await screen.findByText('邀请页面待接入')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe('/account/invite');
+  expect(screen.queryByRole('button', { name: /发送|完成|跳过/ })).toBeNull();
+});
+
+test('成功登录固定去导入，basename内相对导航，不接受任意returnUrl', async () => {
+  mount('/account/login?returnUrl=https://outside.test', '/viewer-base');
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '登录' }));
+  expect(await screen.findByText('导入目标')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe('/local-mask');
+});
+
+test('提交中拒绝双击，失败留页，统一错误不泄露账号是否存在', async () => {
+  let done: (response: Response) => void;
+  const transport = jest.fn(
+    () =>
+      new Promise<Response>(resolve => {
+        done = resolve;
+      })
+  );
+  mockServices = createBusinessServices(
+    { enabled: true },
+    { fetch: transport, storage: sessionStorage }
+  );
+  mount('/account/login');
+  fill();
+  const button = screen.getByRole('button', { name: '登录' });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(transport).toHaveBeenCalledTimes(1);
+  done!({
+    ok: false,
+    status: 401,
+    json: async () => ({ error: { code: 'UNAUTHORIZED', message: '认证失败' } }),
+  } as Response);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe('/account/login');
+  expect(screen.queryByText(/账号不存在|账号未创建/)).toBeNull();
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: '登录' }) as HTMLButtonElement).disabled).toBe(false)
+  );
+});
+
+test('网络错误允许用户重试，缺失容器不伪造登录', async () => {
+  const transport = jest
+    .fn()
+    .mockRejectedValueOnce(new TypeError('network'))
+    .mockResolvedValueOnce(ok());
+  mockServices = createBusinessServices(
+    { enabled: true },
+    { fetch: transport, storage: sessionStorage }
+  );
+  mount('/account/login');
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '登录' }));
+  await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: '登录' }));
+  expect(await screen.findByText('导入目标')).toBeTruthy();
+  cleanup();
+  mockServices = undefined;
+  mount('/account/login');
+  expect(screen.getByRole('alert')).toBeTruthy();
+  fill();
+  expect((screen.getByRole('button', { name: '登录' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+test('原OIDC PrivateRoute职责保持独立，业务开关不能绕过OIDC', () => {
+  const reject = jest.fn(() => h('p', null, 'OIDC需要登录'));
+  mockOidc = { enabled: true, user: null };
+  render(h(PrivateRoute, { handleUnauthenticated: reject }, h('p', null, '原模式')));
+  expect(screen.getByText('OIDC需要登录')).toBeTruthy();
+  expect(reject).toHaveBeenCalled();
+  cleanup();
+  mockOidc = { enabled: false, user: null };
+  render(h(PrivateRoute, { handleUnauthenticated: reject }, h('p', null, '原模式')));
+  expect(screen.getByText('原模式')).toBeTruthy();
+});

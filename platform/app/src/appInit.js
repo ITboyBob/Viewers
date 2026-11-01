@@ -24,6 +24,8 @@ import {
   // utils,
 } from '@ohif/core';
 
+import { businessServicesRegistration } from './business/createBusinessServices';
+
 import loadModules, { loadModule as peerImport } from './pluginImports';
 
 /**
@@ -77,6 +79,10 @@ async function appInit(appConfigOrFunc, defaultExtensions, defaultModes) {
     WorkflowStepsService.REGISTRATION,
     [StudyPrefetcherService.REGISTRATION, appConfig.studyPrefetcher],
   ]);
+
+  if (appConfig.phaseOneBusiness?.enabled) {
+    servicesManager.registerService(businessServicesRegistration, appConfig.phaseOneBusiness);
+  }
 
   errorHandler.getHTTPErrorHandler = () => {
     if (typeof appConfig.httpErrorHandler === 'function') {

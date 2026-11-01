@@ -1,11 +1,15 @@
 import React from 'react';
-import { Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from '@ohif/ui-next';
 
 // Route Components
 import DataSourceWrapper from './DataSourceWrapper';
 import WorkList from './WorkList';
 import Local from './Local';
+import Login from './Account/Login';
+import Register from './Account/Register';
+import InviteRoute from './Account/InviteRoute';
+import BusinessAuthGate, { requiresBusinessAuth } from '../business/BusinessAuthGate';
 import Debug from './Debug';
 import NotFound from './NotFound';
 import buildModeRoutes from './buildModeRoutes';
@@ -38,12 +42,17 @@ const NotFoundStudy = () => {
   return (
     <div className="absolute flex h-full w-full items-center justify-center text-white">
       <div>
-        <h4>
-          One or more of the requested studies are not available at this time.
-        </h4>
+        <h4>One or more of the requested studies are not available at this time.</h4>
         {showStudyList && (
           <p className="mt-2">
-            Return to the <Link className="text-primary-light" to="/">study list</Link> to select a different study to view.
+            Return to the{' '}
+            <Link
+              className="text-primary-light"
+              to="/"
+            >
+              study list
+            </Link>{' '}
+            to select a different study to view.
           </p>
         )}
       </div>
@@ -94,6 +103,7 @@ const createRoutes = ({
   commandsManager,
   hotkeysManager,
   showStudyList,
+  phaseOneBusiness,
 }: withAppTypes) => {
   const routes =
     buildModeRoutes({
@@ -123,8 +133,17 @@ const createRoutes = ({
 
   const customRoutes = customizationService.getCustomization('routes.customRoutes');
 
+  const accountRoutes = phaseOneBusiness?.enabled
+    ? [
+        { path: '/account/login', children: Login },
+        { path: '/account/register', children: Register },
+        { path: '/account/invite', children: InviteRoute },
+      ]
+    : [];
+
   const allRoutes = [
     ...routes,
+    ...accountRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
     ...(customRoutes?.routes || []),
     ...bakedInRoutes,
@@ -134,24 +153,42 @@ const createRoutes = ({
   function RouteWithErrorBoundary({ route, ...rest }) {
     const [appConfig] = useAppConfig();
     const { showErrorDetails } = appConfig;
+    const location = useLocation();
+    const business = servicesManager.services.businessServices;
+    const activeSource =
+      extensionManager.getActiveDataSourceDefinition()?.sourceName ??
+      appConfig.defaultDataSourceName;
+    const businessProtected =
+      !!appConfig.phaseOneBusiness?.enabled &&
+      requiresBusinessAuth(
+        location.pathname,
+        activeSource,
+        location.state,
+        business?.projectRuntime
+      );
 
     history.navigate = useNavigate();
 
     // eslint-disable-next-line react/jsx-props-no-spreading
     return (
-      <ErrorBoundary
-        context={`Route ${route.path}`}
-        showErrorDetails={showErrorDetails}
+      <BusinessAuthGate
+        enabled={businessProtected}
+        preservePageOnInvalidation={route.private === true}
       >
-        <route.children
-          {...rest}
-          {...route.props}
-          route={route}
-          servicesManager={servicesManager}
-          extensionManager={extensionManager}
-          hotkeysManager={hotkeysManager}
-        />
-      </ErrorBoundary>
+        <ErrorBoundary
+          context={`Route ${route.path}`}
+          showErrorDetails={showErrorDetails}
+        >
+          <route.children
+            {...rest}
+            {...route.props}
+            route={route}
+            servicesManager={servicesManager}
+            extensionManager={extensionManager}
+            hotkeysManager={hotkeysManager}
+          />
+        </ErrorBoundary>
+      </BusinessAuthGate>
     );
   }
 

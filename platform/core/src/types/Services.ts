@@ -1,3 +1,4 @@
+import type { BusinessServices } from './BusinessContracts';
 import {
   HangingProtocolService,
   CustomizationService,
@@ -21,6 +22,7 @@ import {
  */
 
 interface Services {
+  businessServices?: BusinessServices;
   hangingProtocolService?: HangingProtocolService;
   customizationService?: CustomizationService;
   measurementService?: MeasurementService;

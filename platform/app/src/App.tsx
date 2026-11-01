@@ -150,6 +150,7 @@ function App({
     hotkeysManager,
     routerBasename,
     showStudyList,
+    phaseOneBusiness: appConfigState.phaseOneBusiness,
   });
 
   if (oidc) {

@@ -1,0 +1,222 @@
+@import './AccountFonts.css';
+
+/* Figma：协作工具／初始工作台，53:316、53:317、53:334。
+ * 项目旧色板与设计存在逐通道差异，以下值只作用于账号页，不替换 OHIF 全局主题。
+ */
+.account-page {
+  --account-canvas: #000000;
+  --account-card: #090c2a;
+  --account-header: #041c49;
+  --account-primary: #358cfd;
+  --account-accent: #5bcde6;
+  --account-text: #fafafa;
+  --account-muted: #7db3cf;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  background: var(--account-canvas);
+  color: var(--account-text);
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+}
+.account-page * {
+  box-sizing: border-box;
+}
+.account-page p,
+.account-page h1,
+.account-page h2 {
+  margin: 0;
+}
+.account-header {
+  height: 64px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  background: var(--account-header);
+}
+.account-brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-weight: 500;
+}
+.account-brand-name {
+  font-family: Inter, sans-serif;
+  font-size: 20px;
+  line-height: 28px;
+}
+.account-brand-divider {
+  height: 20px;
+  width: 1px;
+  background: #7db3cf80;
+}
+.account-workspace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: #358cfd33;
+  color: var(--account-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.account-workspace-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--account-accent);
+  flex-shrink: 0;
+}
+.account-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 0;
+}
+.account-content {
+  width: 480px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  align-items: center;
+}
+.account-guide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  color: var(--account-muted);
+  text-align: center;
+}
+.account-guide h1 {
+  color: var(--account-text);
+  font-size: 32px;
+  line-height: 48px;
+  font-weight: 500;
+}
+.account-page .account-steps {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 20px;
+}
+.account-steps span {
+  color: var(--account-accent);
+  font-weight: 500;
+}
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+}
+.account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px;
+  border: 1px solid #358cfd40;
+  border-radius: 8px;
+  background: var(--account-card);
+}
+.account-card h2 {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+}
+.account-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.account-field input {
+  width: 100%;
+  height: 48px;
+  border: 1px solid #252a74;
+  border-radius: 4px;
+  padding: 0 16px;
+  background: var(--account-canvas);
+  color: var(--account-text);
+  font:
+    400 14px/22px 'Noto Sans SC',
+    sans-serif;
+}
+.account-field input::placeholder {
+  color: var(--account-muted);
+  opacity: 1;
+}
+.account-field input:focus-visible,
+.account-submit:focus-visible,
+.account-switch a:focus-visible {
+  outline-color: var(--account-primary);
+}
+.account-hint,
+.account-error {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--account-muted);
+}
+.account-error {
+  color: #fc8181;
+}
+.account-submit {
+  height: 48px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: #358cfd99;
+  color: var(--account-text);
+  font:
+    500 14px/20px 'Noto Sans SC',
+    sans-serif;
+  cursor: pointer;
+}
+.account-submit:disabled {
+  background: #2d343e;
+  color: #7f94ad;
+  cursor: not-allowed;
+}
+.account-page .account-switch {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--account-muted);
+}
+.account-switch a {
+  color: var(--account-primary);
+  font-weight: 500;
+}
+.account-footer {
+  min-height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 32px;
+  color: var(--account-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.account-footer span:first-child {
+  font-family: Inter, sans-serif;
+}
