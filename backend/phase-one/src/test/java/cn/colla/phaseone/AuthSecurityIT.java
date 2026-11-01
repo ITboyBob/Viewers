@@ -78,6 +78,7 @@ class AuthSecurityIT {
     }
 
     @Test void exactExpiryBoundaryRejectsSessionWithoutSleeping() throws Exception {
+        clock.set(Instant.parse("2026-11-01T00:00:00.123456789Z"));
         var user = register("expiry-user"); Instant expires = Instant.parse(user.path("expires_at").asText());
         assertThat(expires).isEqualTo(clock.instant().plus(Duration.ofHours(8)));
         clock.set(expires.minusNanos(1));

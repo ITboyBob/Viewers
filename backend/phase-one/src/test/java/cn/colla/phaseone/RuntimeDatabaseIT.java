@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.web.servlet.MockMvc;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -73,6 +74,15 @@ class RuntimeDatabaseIT {
         http.perform(get("/actuator/health")).andExpect(status().isOk());
         http.perform(get("/api/v1/auth/sessions/current")).andExpect(status().isUnauthorized());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM app_user", Integer.class)).isEqualTo(1);
+    }
+
+    @Test void incompatibleExistingStructureMakesSqlInitializationFailFast() throws Exception {
+        String name = "conflict_" + UUID.randomUUID();
+        try (var connection = DriverManager.getConnection("jdbc:h2:mem:" + name + ";DB_CLOSE_DELAY=-1", "sa", ""); var statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE auth_session(token_hash CHAR(64) PRIMARY KEY)");
+        }
+        assertThatThrownBy(() -> new SpringApplicationBuilder(PhaseOneApplication.class).run("--server.port=0", "--colla.database-name=" + name))
+            .isInstanceOf(Exception.class).hasStackTraceContaining("V001__identity.sql");
     }
 
     @Test void separateApplicationContextsHaveSeparateDataAndSessionDigests() {
