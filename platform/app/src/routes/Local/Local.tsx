@@ -5,6 +5,7 @@ import type {
   LocalImportScope,
   LocalProject,
   ProjectLifecycleHandle,
+  SharedFilePublicationPort,
 } from '@ohif/core';
 import { useAppConfig } from '@state';
 import { useNavigate } from 'react-router-dom';
@@ -208,11 +209,13 @@ function MaskLocal() {
   const projects = business?.localProjects,
     tasks = business?.tasks,
     runtime = business?.projectRuntime;
+  const publisher = business?.localCollaboration?.publisher;
   const navigate = useNavigate();
   const mounted = useRef(true),
     locked = useRef(false),
     transferred = useRef(false);
   const projectRef = useRef<LocalProject | null>(null);
+  const publicationRef = useRef<ReturnType<SharedFilePublicationPort['prepare']> | null>(null);
   const preparedRef = useRef<{ project: LocalProject; scope: LocalImportScope } | null>(null);
   const [status, setStatus] = React.useState<'idle' | 'parsing' | 'registering'>('idle');
   const [error, setError] = React.useState('');
@@ -236,6 +239,7 @@ function MaskLocal() {
         if (projectRef.current) {
           tasks?.cancel(projectRef.current);
         }
+        publicationRef.current?.cancel();
         try {
           preparedRef.current?.scope.release();
         } finally {
@@ -243,7 +247,7 @@ function MaskLocal() {
         }
       }
     };
-  }, [projects, tasks]);
+  }, [projects, tasks, publisher]);
 
   const register = async (project: LocalProject) => {
     if (!projects || !tasks || !runtime) {
@@ -269,6 +273,8 @@ function MaskLocal() {
     try {
       scope.activate();
       handle = runtime.bind(project, scope);
+      // 共享存储是独立增量；失败／慢写不阻塞原导航与事件桥接。
+      void publisher?.publish(project).catch(() => undefined);
       const query = new URLSearchParams();
       project.study_uids.forEach(uid => query.append('StudyInstanceUIDs', uid));
       query.append('datasources', 'dicomlocal');
@@ -276,6 +282,7 @@ function MaskLocal() {
       navigate(`/${project.mode_path}?${query.toString()}`, { state: { phaseOneMask: true } });
     } catch (error) {
       transferred.current = false;
+      publisher?.cancel(project);
       try {
         if (handle) {
           handle.releaseScope();
@@ -306,16 +313,21 @@ function MaskLocal() {
         preparedRef.current?.scope.release();
         preparedRef.current = null;
         projectRef.current = null;
+        publicationRef.current?.cancel();
+        publicationRef.current = publisher?.prepare(input) ?? null;
         project = await projects.create(input, microscopyLoaded);
         if (!mounted.current) {
+          publicationRef.current?.cancel();
           return;
         }
         setFailures(projects.getFailures());
         if (!project) {
+          publicationRef.current?.cancel();
           setError('本批次没有可用影像或身份已变化，请重新选择。');
           return;
         }
         projectRef.current = project;
+        publicationRef.current?.attach(project);
         if (project.failures.length) {
           uiNotificationService?.show({
             title: '部分文件导入失败',
@@ -330,6 +342,9 @@ function MaskLocal() {
       }
     } catch (error) {
       if (mounted.current) {
+        if (!projectRef.current) {
+          publicationRef.current?.cancel();
+        }
         setError(error instanceof Error ? error.message : '导入或登记失败，请重试');
         const project = projectRef.current;
         setRetryProject(project && projects.isCurrent(project) ? project : null);

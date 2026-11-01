@@ -23,7 +23,8 @@ export class ProjectRuntimeService implements ProjectRuntime {
   private binding: Binding | null = null;
   constructor(
     private readonly projects: LocalProjects,
-    private readonly tasks?: TaskApi
+    private readonly tasks?: TaskApi,
+    private readonly onDeactivate?: (project: LocalProject) => void
   ) {}
   get phaseOneMask() {
     return this.binding !== null;
@@ -87,6 +88,7 @@ export class ProjectRuntimeService implements ProjectRuntime {
         binding.active = false;
         binding.generation++;
         binding.stopBridge?.();
+        this.onDeactivate?.(project);
       },
       releaseScope: () => {
         if (released) {

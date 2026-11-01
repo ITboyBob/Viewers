@@ -152,6 +152,44 @@ async function select(files = [file()], folder = false) {
     });
   });
 }
+test('共享引用先于解析保留，真实登记后异步发布且不阻塞原导航', async () => {
+  const prepared = { attach: jest.fn(), cancel: jest.fn() };
+  const publisher = {
+    prepare: jest.fn(() => prepared),
+    publish: jest.fn(() => new Promise(() => {})),
+    cancel: jest.fn(),
+  };
+  mockServices.businessServices.localCollaboration = { publisher };
+  parse.mockImplementationOnce(async input => {
+    expect(publisher.prepare).toHaveBeenCalledWith(input);
+    return {
+      batch_id: 'b',
+      kind: 'files',
+      successes: [
+        {
+          selection_index: 0,
+          file_name: input.files[0].name,
+          image_id: 'dicomfile:0',
+          study_uid: '1',
+          series_uid: '1.2',
+          sop_uid: '1.2.3',
+          dataset: dataset(),
+        },
+      ],
+      failures: [],
+      study_uids: ['1'],
+    };
+  });
+  mount();
+  await select();
+  await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1));
+  expect(prepared.attach).toHaveBeenCalledWith(
+    mockServices.businessServices.localProjects.getCurrent()
+  );
+  expect(publisher.publish).toHaveBeenCalledWith(
+    expect.objectContaining({ phase: 'registered', task_id: task().task_id })
+  );
+});
 test('pending不激活scope、不导航；只有校验后的真实ID才能先激活再导航', async () => {
   let finish;
   request.mockReturnValue(

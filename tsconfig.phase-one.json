@@ -41,7 +41,9 @@
     "platform/app/src/routes/Mode/Mode.tsx",
     "platform/app/src/App.tsx",
     "playwright.phase-one.config.ts",
+    "playwright.local-shared.config.ts",
     "tests/phase-one/**/*.ts",
+    "tests/local-shared/**/*.ts",
     "extensions/default/src/ViewerLayout/ViewerHeader.tsx",
     "platform/ui-next/src/components/Header/Header.tsx"
   ],

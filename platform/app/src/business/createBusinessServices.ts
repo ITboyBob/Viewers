@@ -8,12 +8,18 @@ import { ProjectRuntimeService } from './ProjectRuntimeService';
 import { BusinessSessionService } from './BusinessSessionService';
 import { TeamInvitationService } from './TeamInvitationService';
 import { CollaborationMockStore } from './mock/CollaborationMockStore';
+import { LocalParticipationIdentity } from './localCollaboration/LocalParticipationIdentity';
+import { SharedFileStore } from './localCollaboration/SharedFileStore';
+import { SharedFilePublisher } from './localCollaboration/SharedFilePublisher';
+import type { SharedFilePort } from '@ohif/core';
 
 type Dependencies = {
   fetch?: typeof fetch;
   storage?: Storage | null;
   timeoutMs?: number;
   clock?: () => number;
+  sharedFiles?: SharedFilePort;
+  basePath?: string;
 };
 function browserStorage(): Storage | null {
   try {
@@ -53,7 +59,18 @@ export function createBusinessServices(
     identityGeneration: () => identityGeneration,
   });
   const tasks = new TaskService(api, localProjects);
-  const projectRuntime = new ProjectRuntimeService(localProjects, tasks);
+  const projectRuntime = new ProjectRuntimeService(localProjects, tasks, project => {
+    const participant = services.localCollaboration?.participation;
+    if (
+      participant?.identity.role === 'source' &&
+      participant.identity.task_id === project.task_id
+    ) {
+      participant.close(
+        session.getSnapshot().status === 'invalid' ? 'identity_invalid' : 'source_invalid'
+      );
+    }
+    services.localCollaboration?.publisher?.cancel(project);
+  });
   const services: BusinessServices = {
     api,
     session,
@@ -63,6 +80,40 @@ export function createBusinessServices(
     teamInvitations: new TeamInvitationService(api),
   };
   if (configuration.enabled) {
+    const identities = new LocalParticipationIdentity(
+      session,
+      localProjects,
+      () => identityGeneration,
+      undefined,
+      (identity, reason) => {
+        const project = projectRuntime.getCurrent();
+        if (
+          identity.role === 'source' &&
+          (identity.session_generation !== identityGeneration ||
+            session.getSnapshot().status === 'invalid' ||
+            project?.phase === 'invalid' ||
+            project?.phase === 'disposed')
+        ) {
+          projectRuntime.getHandle()?.deactivate();
+        }
+        if (services.localCollaboration?.participation?.identity === identity) {
+          services.localCollaboration.participation.close(reason);
+        }
+      }
+    );
+    const files =
+      dependencies.sharedFiles ?? new SharedFileStore({ basePath: dependencies.basePath });
+    services.localCollaboration = {
+      identities,
+      files,
+      publisher: new SharedFilePublisher({
+        session,
+        projects: localProjects,
+        identities,
+        files,
+        generation: () => identityGeneration,
+      }),
+    };
     const stores = new Map<string, CollaborationMockStore>();
     const storage = dependencies.storage === undefined ? browserStorage() : dependencies.storage;
     services.collaborationMock = {
