@@ -21,7 +21,9 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
     extensionManager.getActiveDataSourceDefinition()?.sourceName ?? appConfig.defaultDataSourceName;
   const maskViewer =
     !!appConfig.phaseOneBusiness?.enabled &&
-    (pathname === '/segmentation/dicomlocal' ||
+    ((pathname === '/local-shared' &&
+      !!businessServices?.localCollaboration?.sharedView?.getSnapshot()) ||
+      pathname === '/segmentation/dicomlocal' ||
       (pathname === '/segmentation' && source === 'dicomlocal') ||
       (/^\/microscopy(?:\/|$)/.test(pathname) &&
         (location.state?.phaseOneMask === true ||

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useReducer } from 'react';
+import { Link } from 'react-router-dom';
 import type { BusinessServices } from '@ohif/core';
 import useBusinessSession from '../useBusinessSession';
 import MemberOverlay from './MemberOverlay';
@@ -16,6 +17,13 @@ export default function BusinessTopBar({
   services: BusinessServices;
 }) {
   const snapshot = useBusinessSession(services.session);
+  const [, refreshSharing] = useReducer(value => value + 1, 0);
+  const shared = services.localCollaboration;
+  useEffect(() => shared?.publisher?.subscribe(refreshSharing), [shared?.publisher]);
+  const source = shared?.identities.getSource();
+  const sharingReady =
+    source?.getSnapshot().publication_phase === 'ready' &&
+    shared?.participation?.getSnapshot().phase === 'active';
   if (snapshot.status !== 'authenticated' || !snapshot.context) {
     return null;
   }
@@ -47,6 +55,16 @@ export default function BusinessTopBar({
           key={`invite:${user.uid}`}
           store={store}
         />
+      )}
+      {page === 'viewer' && sharingReady && (
+        <Link
+          className="text-primary px-2 text-xs"
+          to={`/local-shared?task_id=${encodeURIComponent(source.task_id)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          共享链接
+        </Link>
       )}
     </div>
   );

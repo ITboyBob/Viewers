@@ -10,7 +10,12 @@ export function requiresBusinessAuth(
   runtime?: BusinessRuntime
 ) {
   const path = pathname.replace(/\/$/, '');
-  if (path === '/local-mask' || path === '/account/invite' || path === '/segmentation/dicomlocal') {
+  if (
+    path === '/local-mask' ||
+    path === '/local-shared' ||
+    path === '/account/invite' ||
+    path === '/segmentation/dicomlocal'
+  ) {
     return true;
   }
   if (path === '/segmentation') {

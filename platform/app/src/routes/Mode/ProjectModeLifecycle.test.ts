@@ -5,7 +5,10 @@ import type { LocalProject, LocalProjects } from '@ohif/core';
 import ModeRoute from './Mode';
 import loadModules from '../../pluginImports';
 import { defaultRouteInit } from './defaultRouteInit';
-import { ProjectRuntimeService } from '../../business/ProjectRuntimeService';
+import {
+  ProjectRuntimeService,
+  createModeProjectLifecycle,
+} from '../../business/ProjectRuntimeService';
 import store from '../../../../core/src/services/DicomMetadataStore/DicomMetadataStore';
 jest.mock(
   '@ohif/core',
@@ -119,6 +122,52 @@ afterEach(() => {
 function mount() {
   return render(h(MemoryRouter, null, h(ModeRoute, props)));
 }
+test.each([false, true])(
+  '共享Mode只消费本窗Study与独立lifecycle，原生完成前不ready，提前退出=%s',
+  async exitEarly => {
+    mockQuery = 'token=untrusted&StudyInstanceUIDs=999';
+    const beginOld = jest.spyOn(runtime, 'beginMode');
+    const releaseShared = jest.fn();
+    const lifecycle = createModeProjectLifecycle({
+      deactivate: jest.fn(),
+      releaseScope: releaseShared,
+    });
+    const markViewReady = jest.fn();
+    props.phaseOneMask = false;
+    props.sharedView = { task_id: 'task', load_generation: 7, study_uids: ['1'] };
+    props.servicesManager.services.businessServices.localCollaboration = {
+      sharedView: { getModeLifecycle: () => lifecycle, markViewReady },
+    };
+    let finish: (value: unknown[]) => void;
+    (defaultRouteInit as jest.Mock).mockImplementation(
+      () =>
+        new Promise(resolve => {
+          finish = resolve;
+        })
+    );
+    const view = mount();
+    await waitFor(() => expect(defaultRouteInit).toHaveBeenCalled());
+    const query =
+      props.extensionManager.getActiveDataSourceOrNull().initialize.mock.calls[0][0].query;
+    expect(query.getAll('StudyInstanceUIDs')).toEqual(['1']);
+    expect(query.get('token')).toBeNull();
+    expect(beginOld).not.toHaveBeenCalled();
+    expect(markViewReady).not.toHaveBeenCalled();
+    if (exitEarly) {
+      view.unmount();
+    }
+    await act(async () => {
+      finish!([]);
+    });
+    if (exitEarly) {
+      expect(markViewReady).not.toHaveBeenCalled();
+    } else {
+      expect(markViewReady).toHaveBeenCalledWith(7);
+      view.unmount();
+    }
+    expect(releaseShared).toHaveBeenCalledTimes(1);
+  }
+);
 test('真实Mode卸载显式最前失活，原生退出与退订后finally释放真实scope', async () => {
   const view = mount();
   await waitFor(() => expect(props.mode.onSetupRouteComplete).toHaveBeenCalled());

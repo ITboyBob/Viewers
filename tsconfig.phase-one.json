@@ -38,6 +38,7 @@
     "platform/app/src/routes/buildModeRoutes.tsx",
     "platform/app/src/routes/Local/**/*.ts",
     "platform/app/src/routes/Local/**/*.tsx",
+    "platform/app/src/routes/LocalShared/**/*.tsx",
     "platform/app/src/routes/Mode/Mode.tsx",
     "platform/app/src/App.tsx",
     "playwright.phase-one.config.ts",

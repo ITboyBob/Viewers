@@ -11,9 +11,11 @@ import { CollaborationMockStore } from './mock/CollaborationMockStore';
 import { LocalParticipationIdentity } from './localCollaboration/LocalParticipationIdentity';
 import { SharedFileStore } from './localCollaboration/SharedFileStore';
 import { SharedFilePublisher } from './localCollaboration/SharedFilePublisher';
-import type { SharedFilePort, LocalChannelPort, LocalClockPort } from '@ohif/core';
+import { DicomMetadataStore } from '@ohif/core';
+import type { SharedFilePort, LocalChannelPort, LocalClockPort, ImportBatch } from '@ohif/core';
 import { LocalParticipationService } from './localCollaboration/LocalParticipationService';
 import { SourceSessionVerifier } from './localCollaboration/SourceSessionVerifier';
+import { SharedViewService } from './localCollaboration/SharedViewService';
 import { routerBasename } from '../utils/publicUrl';
 
 type Dependencies = {
@@ -129,9 +131,24 @@ export function createBusinessServices(
       }
     );
     const files = dependencies.sharedFiles ?? new SharedFileStore({ basePath });
+    let releaseSharedBatch: ((batch: ImportBatch) => unknown) | undefined;
     services.localCollaboration = {
       identities,
       files,
+      sharedView: new SharedViewService({
+        session,
+        generation: () => identityGeneration,
+        files,
+        createParticipation: taskId =>
+          services.localCollaboration!.createViewerParticipation!(taskId),
+        parse: async input => {
+          const loader = await import('../routes/Local/filesToImportBatch');
+          releaseSharedBatch = loader.releaseImportBatch;
+          return loader.default(input);
+        },
+        release: batch => releaseSharedBatch?.(batch),
+        prepareScope: (id, datasets) => DicomMetadataStore.prepareLocalImportScope(id, datasets),
+      }),
       createViewerParticipation: taskId => {
         const identity = identities.viewer(taskId);
         let channel: LocalChannelPort | undefined;
@@ -186,6 +203,7 @@ export function createBusinessServices(
     if (typeof window !== 'undefined') {
       window.addEventListener('pagehide', () => {
         projectRuntime.getHandle()?.deactivate();
+        shared.sharedView?.dispose();
         shared.participation?.close('exit');
         shared.publisher?.cancel();
       });

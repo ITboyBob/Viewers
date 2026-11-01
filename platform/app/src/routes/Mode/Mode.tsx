@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useLocation } from 'react-router';
 import PropTypes from 'prop-types';
 import { utils } from '@ohif/core';
-import type { HotkeysManager } from '@ohif/core';
+import type { HotkeysManager, SharedViewContext } from '@ohif/core';
 import { createModeProjectLifecycle } from '../../business/ProjectRuntimeService';
 import { ImageViewerProvider, DragAndDropProvider } from '@ohif/ui-next';
 import { useSearchParams } from '../../hooks';
@@ -45,6 +45,7 @@ export type ModeRouteProps = {
   commandsManager: AppTypes.CommandsManager;
   hotkeysManager: HotkeysManager;
   phaseOneMask?: boolean;
+  sharedView?: SharedViewContext;
 };
 
 export default function ModeRoute({
@@ -55,14 +56,18 @@ export default function ModeRoute({
   commandsManager,
   hotkeysManager,
   phaseOneMask = false,
+  sharedView,
 }: ModeRouteProps) {
   const [appConfig] = useAppConfig();
+  const sharedGeneration = sharedView?.load_generation;
   const lifetime = useRef<ReturnType<typeof createModeProjectLifecycle> | null>(null);
   if (!lifetime.current) {
     lifetime.current =
-      (phaseOneMask
-        ? servicesManager.services.businessServices?.projectRuntime?.getModeLifecycle()
-        : null) ?? createModeProjectLifecycle(null);
+      (sharedView
+        ? servicesManager.services.businessServices?.localCollaboration?.sharedView?.getModeLifecycle()
+        : phaseOneMask
+          ? servicesManager.services.businessServices?.projectRuntime?.getModeLifecycle()
+          : null) ?? createModeProjectLifecycle(null);
   }
   useEffect(() => () => lifetime.current.dispose(), []);
 
@@ -72,7 +77,13 @@ export default function ModeRoute({
   // The react router DOM placeholder map (see https://reactrouter.com/en/main/hooks/use-params).
   const params = useParams();
   // The URL's query search parameters where the keys casing is maintained
-  const query = useSearchParams();
+  const incomingQuery = useSearchParams();
+  const query = sharedView
+    ? new URLSearchParams([
+        ...sharedView.study_uids.map(uid => ['StudyInstanceUIDs', uid]),
+        ['datasources', 'dicomlocal'],
+      ])
+    : incomingQuery;
 
   mode?.onModeInit?.({
     servicesManager,
@@ -83,7 +94,10 @@ export default function ModeRoute({
   });
 
   // The URL's query search parameters where the keys are all lower case.
-  const lowerCaseSearchParams = useSearchParams({ lowerCaseKeys: true });
+  const incomingLowerCase = useSearchParams({ lowerCaseKeys: true });
+  const lowerCaseSearchParams = sharedView
+    ? new URLSearchParams([...query.entries()].map(([key, value]) => [key.toLowerCase(), value]))
+    : incomingLowerCase;
 
   const [studyInstanceUIDs, setStudyInstanceUIDs] = useState(null);
 
@@ -392,6 +406,12 @@ export default function ModeRoute({
       .then(() => {
         if (!exited) {
           mode?.onSetupRouteComplete?.({ servicesManager, extensionManager, commandsManager });
+          const shared = servicesManager.services.businessServices?.localCollaboration;
+          if (sharedGeneration !== undefined) {
+            shared?.sharedView?.markViewReady(sharedGeneration);
+          } else if (phaseOneMask) {
+            shared?.identities.getSource()?.setViewReady(true);
+          }
         }
       })
       .catch(() => {
@@ -416,6 +436,7 @@ export default function ModeRoute({
     studyInstanceUIDs,
     refresh,
     phaseOneMask,
+    sharedGeneration,
   ]);
 
   if (!studyInstanceUIDs || !layoutTemplateData.current || !ExtensionDependenciesLoaded) {

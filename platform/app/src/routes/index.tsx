@@ -6,6 +6,7 @@ import { ErrorBoundary } from '@ohif/ui-next';
 import DataSourceWrapper from './DataSourceWrapper';
 import WorkList from './WorkList';
 import Local from './Local';
+import LocalShared from './LocalShared/LocalShared';
 import Login from './Account/Login';
 import Register from './Account/Register';
 import InviteRoute from './Account/InviteRoute';
@@ -156,6 +157,19 @@ const createRoutes = ({
         { path: '/account/login', children: Login },
         { path: '/account/register', children: Register },
         { path: '/account/invite', children: InviteRoute },
+        {
+          path: '/local-shared',
+          private: true,
+          children: LocalShared,
+          props: {
+            modes,
+            dataSources,
+            extensionManager,
+            servicesManager,
+            commandsManager,
+            hotkeysManager,
+          },
+        },
       ]
     : [];
 
