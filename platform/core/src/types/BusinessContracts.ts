@@ -24,6 +24,7 @@ export type BusinessRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  idempotencyKey?: string;
 };
 export interface BusinessApi {
   request<T>(path: string, options?: BusinessRequestOptions): Promise<T>;
@@ -48,5 +49,78 @@ export type BusinessRuntime = Readonly<Required<PhaseOneRouteState>>;
 export interface BusinessServices {
   api: BusinessApi;
   session: BusinessSession;
-  projectRuntime?: BusinessRuntime;
+  localProjects?: LocalProjects;
+  tasks?: TaskApi;
+  projectRuntime?: ProjectRuntime;
+}
+
+/** 本地影像及project仅保存在当前页面内存，不进入业务请求或浏览器存储。 */
+export type ImportSelection = {
+  files: readonly File[];
+  kind: 'files' | 'folder';
+  folderName?: string;
+};
+export type BatchSuccess = {
+  readonly selection_index: number;
+  readonly file_name: string;
+  readonly relative_path?: string;
+  readonly image_id: string;
+  readonly study_uid: string;
+  readonly series_uid: string;
+  readonly sop_uid: string;
+  readonly dataset: Record<string, unknown>;
+};
+export type BatchFailure = {
+  selection_index: number;
+  file_name: string;
+  reason: 'PARSE_FAILED' | 'INVALID_DATASET' | 'CLEANUP_FAILED';
+};
+export type ImportBatch = {
+  readonly batch_id: string;
+  readonly kind: 'files' | 'folder';
+  readonly folder_name?: string;
+  readonly successes: readonly BatchSuccess[];
+  readonly failures: readonly BatchFailure[];
+  readonly study_uids: readonly string[];
+};
+export type LocalProject = ImportBatch & {
+  readonly importer_uid: string;
+  readonly team_id: string;
+  readonly title: string;
+  readonly registration_key: string;
+  readonly mode_path: 'segmentation/dicomlocal' | 'microscopy';
+  task_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  phase: 'parsing' | 'ready' | 'registering' | 'registered' | 'invalid' | 'disposed';
+};
+export interface LocalProjects {
+  create(input: ImportSelection, microscopyLoaded?: boolean): Promise<LocalProject | null>;
+  getCurrent(): LocalProject | null;
+  getFailures(): readonly BatchFailure[];
+  isCurrent(project: LocalProject): boolean;
+  dispose(): void;
+}
+
+export type BusinessTask = {
+  task_id: string;
+  team_id: string;
+  title: string;
+  assignee_uid: string;
+  metadata: Record<string, never>;
+  created_at: string;
+  updated_at: string;
+};
+export interface TaskApi {
+  register(project: LocalProject): Promise<BusinessTask>;
+  cancel(project: LocalProject): void;
+}
+export type LocalImportScope = { activate(): void; release(): void };
+export type ProjectLifecycleHandle = { deactivate(): void; releaseScope(): void };
+export type ProjectModeLifecycle = { setNativeExit(exit: () => void): () => void; dispose(): void };
+export interface ProjectRuntime extends BusinessRuntime {
+  bind(project: LocalProject, scope: LocalImportScope): ProjectLifecycleHandle;
+  getCurrent(): LocalProject | null;
+  getHandle(): ProjectLifecycleHandle | null;
+  getModeLifecycle(): ProjectModeLifecycle | null;
 }

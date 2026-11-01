@@ -25,7 +25,7 @@ const compare = (a, b, defaultCompare = 0): number => {
  * order or in study instance UID order - not very useful, but
  * if not specifically specified then at least making it consistent is useful.
  */
-const getStudiesfromDisplaySets = (displaysets): StudyMetadata[] => {
+const getStudiesfromDisplaySets = (displaySets: Types.DisplaySet[]): StudyMetadata[] => {
   const studyMap = {};
 
   const ret = displaySets.reduce((prev, curr) => {
@@ -56,7 +56,10 @@ const getStudiesFromUIDs = (studyUids: string[]): StudyMetadata[] => {
 };
 
 /** Gets the array of studies */
-const getStudies = (studyUids?: string[], displaySets): StudyMetadata[] => {
+const getStudies = (
+  studyUids: string[] | undefined,
+  displaySets: Types.DisplaySet[]
+): StudyMetadata[] => {
   return getStudiesFromUIDs(studyUids) || getStudiesfromDisplaySets(displaySets);
 };
 

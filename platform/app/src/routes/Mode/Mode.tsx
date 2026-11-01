@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useLocation } from 'react-router';
 import PropTypes from 'prop-types';
 import { utils } from '@ohif/core';
+import type { HotkeysManager } from '@ohif/core';
+import { createModeProjectLifecycle } from '../../business/ProjectRuntimeService';
 import { ImageViewerProvider, DragAndDropProvider } from '@ohif/ui-next';
 import { useSearchParams } from '../../hooks';
 import { useAppConfig } from '@state';
@@ -13,6 +15,38 @@ import { updateAuthServiceAndCleanUrl } from './updateAuthServiceAndCleanUrl';
 
 const { getSplitParam } = utils;
 
+type ModeLayout = {
+  id: string;
+  props: Record<string, unknown> & { leftPanels?: string[]; rightPanels?: string[] };
+};
+export type ModeDefinition = {
+  routeName: string;
+  extensions: Record<string, unknown>;
+  sopClassHandlers: string[];
+  hangingProtocol?: string | string[];
+  routes: Array<{
+    layoutTemplate(context: Record<string, unknown>): ModeLayout | Promise<ModeLayout>;
+    init?(
+      context: Record<string, unknown>,
+      protocol: string | string[],
+      stage: number
+    ): unknown | Promise<unknown>;
+  }>;
+  onModeInit?(context: Record<string, unknown>): void;
+  onModeEnter?(context: Record<string, unknown>): void;
+  onModeExit?(context: Record<string, unknown>): void;
+  onSetupRouteComplete?(context: Record<string, unknown>): void;
+};
+export type ModeRouteProps = {
+  mode: ModeDefinition;
+  dataSourceName?: string;
+  extensionManager: AppTypes.ExtensionManager;
+  servicesManager: AppTypes.ServicesManager;
+  commandsManager: AppTypes.CommandsManager;
+  hotkeysManager: HotkeysManager;
+  phaseOneMask?: boolean;
+};
+
 export default function ModeRoute({
   mode,
   dataSourceName,
@@ -20,8 +54,17 @@ export default function ModeRoute({
   servicesManager,
   commandsManager,
   hotkeysManager,
-}: withAppTypes) {
+  phaseOneMask = false,
+}: ModeRouteProps) {
   const [appConfig] = useAppConfig();
+  const lifetime = useRef<ReturnType<typeof createModeProjectLifecycle> | null>(null);
+  if (!lifetime.current) {
+    lifetime.current =
+      (phaseOneMask
+        ? servicesManager.services.businessServices?.projectRuntime?.getModeLifecycle()
+        : null) ?? createModeProjectLifecycle(null);
+  }
+  useEffect(() => () => lifetime.current.dispose(), []);
 
   // Parse route params/querystring
   const location = useLocation();
@@ -47,7 +90,7 @@ export default function ModeRoute({
   const [refresh, setRefresh] = useState(false);
   const [ExtensionDependenciesLoaded, setExtensionDependenciesLoaded] = useState(false);
 
-  const layoutTemplateData = useRef(false);
+  const layoutTemplateData = useRef<ModeLayout | null>(null);
   const locationRef = useRef(null);
   const isMounted = useRef(false);
 
@@ -89,7 +132,7 @@ export default function ModeRoute({
       const loadedExtensions = await loadModules(Object.keys(extensions));
       for (const extension of loadedExtensions) {
         const { id: extensionId } = extension;
-        if (extensionManager.registeredExtensionIds.indexOf(extensionId) === -1) {
+        if (extensionManager.getRegisteredExtensionIds().indexOf(extensionId) === -1) {
           await extensionManager.registerExtension(extension);
         }
       }
@@ -146,8 +189,8 @@ export default function ModeRoute({
         const { leftPanels = [], rightPanels = [], ...layoutProps } = layoutData.props;
 
         panelService.reset();
-        panelService.addPanels(panelService.PanelPosition.Left, leftPanels);
-        panelService.addPanels(panelService.PanelPosition.Right, rightPanels);
+        panelService.addPanels(panelService.PanelPosition.Left, leftPanels, undefined);
+        panelService.addPanels(panelService.PanelPosition.Right, rightPanels, undefined);
 
         // layoutProps contains all props but leftPanels and rightPanels
         layoutData.props = layoutProps;
@@ -169,6 +212,29 @@ export default function ModeRoute({
       return;
     }
 
+    let exited = false;
+    const unsubscriptions: Array<() => void> = [];
+    const stop = (unsubscribe: () => void) => {
+      try {
+        unsubscribe();
+      } catch (error) {
+        console.warn('native unsubscribe failure');
+      }
+    };
+    const track = (values: unknown) => {
+      if (!Array.isArray(values)) {
+        return;
+      }
+      values
+        .filter(value => typeof value === 'function')
+        .forEach(unsubscribe => {
+          if (exited) {
+            stop(unsubscribe);
+          } else {
+            unsubscriptions.push(unsubscribe);
+          }
+        });
+    };
     const setupRouteInit = async () => {
       // TODO: For some reason this is running before the Providers
       // are calling setServiceImplementation
@@ -179,12 +245,7 @@ export default function ModeRoute({
       // Add SOPClassHandlers to a new SOPClassManager.
       displaySetService.init(extensionManager, sopClassHandlers);
 
-      extensionManager.onModeEnter({
-        servicesManager,
-        extensionManager,
-        commandsManager,
-        appConfig,
-      });
+      extensionManager.onModeEnter();
 
       // use the URL hangingProtocolId if it exists, otherwise use the one
       // defined in the mode configuration
@@ -218,7 +279,9 @@ export default function ModeRoute({
 
       // Move hotkeys setup here, after onModeEnter
       const hotkeys = customizationService.getCustomization('ohif.hotkeyBindings');
-      hotkeysManager.setDefaultHotKeys(hotkeys);
+      hotkeysManager.setDefaultHotKeys(
+        hotkeys as unknown as Parameters<HotkeysManager['setDefaultHotKeys']>[0]
+      );
 
       /**
        * The next line should get all the query parameters provided by the URL
@@ -232,7 +295,7 @@ export default function ModeRoute({
        * }
        */
       const filters =
-        Array.from(query.keys()).reduce((acc: Record<string, string>, val: string) => {
+        Array.from(query.keys()).reduce((acc: Record<string, string[]>, val: string) => {
           const lowerVal = val.toLowerCase();
           // Not sure why the case matters here - it doesn't in the URL
           if (lowerVal === 'seriesinstanceuids' || lowerVal === 'seriesinstanceuid') {
@@ -245,10 +308,8 @@ export default function ModeRoute({
           return { ...acc, [val]: getSplitParam(lowerVal, query) };
         }, {}) ?? {};
 
-      let unsubs;
-
       if (route.init) {
-        unsubs = await route.init(
+        const unsubs = await route.init(
           {
             servicesManager,
             extensionManager,
@@ -260,59 +321,59 @@ export default function ModeRoute({
           hangingProtocolIdToUse,
           stageIndexToUse
         );
+        track(unsubs);
       }
-
-      return defaultRouteInit(
-        {
-          servicesManager,
-          studyInstanceUIDs,
-          dataSource,
-          filters,
-          appConfig,
-        },
-        hangingProtocolIdToUse,
-        stageIndexToUse
+      if (exited) {
+        return;
+      }
+      track(
+        await defaultRouteInit(
+          {
+            servicesManager,
+            studyInstanceUIDs,
+            dataSource,
+            filters,
+            appConfig,
+          },
+          hangingProtocolIdToUse,
+          stageIndexToUse
+        )
       );
     };
 
-    let unsubscriptions;
-    setupRouteInit().then(unsubs => {
-      unsubscriptions = unsubs;
-
-      mode?.onSetupRouteComplete?.({
-        servicesManager,
-        extensionManager,
-        commandsManager,
-      });
-    });
-
-    return () => {
-      // The mode.onModeExit must be done first to allow it to store
-      // information, and must be in a try/catch to ensure subscriptions
-      // are unsubscribed.
+    const cleanup = lifetime.current.setNativeExit(() => {
+      exited = true;
+      // 本期业务先失活由共享边界保证，随后保持原mode→hotkeys→退订→extension次序。
       try {
-        mode?.onModeExit?.({
-          servicesManager,
-          extensionManager,
-          appConfig,
-        });
-      } catch (e) {
-        console.warn('mode exit failure', e);
+        try {
+          mode?.onModeExit?.({ servicesManager, extensionManager, appConfig });
+        } catch (error) {
+          console.warn('mode exit failure', error);
+        }
+      } finally {
+        try {
+          hotkeysManager.destroy();
+        } finally {
+          try {
+            unsubscriptions.splice(0).forEach(stop);
+          } finally {
+            extensionManager.onModeExit();
+          }
+        }
       }
-      // Clean up hotkeys
-      hotkeysManager.destroy();
-
-      // The unsubscriptions must occur before the extension onModeExit
-      // in order to prevent exceptions during cleanup caused by spurious events
-      if (unsubscriptions) {
-        unsubscriptions.forEach(unsub => {
-          unsub();
-        });
-      }
-      // The extension manager must be called after the mode, this is
-      // expected to cleanup the state to a standard setup.
-      extensionManager.onModeExit();
-    };
+    });
+    setupRouteInit()
+      .then(() => {
+        if (!exited) {
+          mode?.onSetupRouteComplete?.({ servicesManager, extensionManager, commandsManager });
+        }
+      })
+      .catch(() => {
+        if (!exited) {
+          console.warn('mode setup failure');
+        }
+      });
+    return cleanup;
   }, [
     mode,
     dataSourceName,
@@ -344,7 +405,9 @@ export default function ModeRoute({
     const layoutTemplateModuleEntry = extensionManager.getModuleEntry(
       layoutTemplateData.current.id
     );
-    const LayoutComponent = layoutTemplateModuleEntry.component;
+    const LayoutComponent = (
+      layoutTemplateModuleEntry as { component: React.ComponentType<Record<string, unknown>> }
+    ).component;
 
     return <LayoutComponent {...props} />;
   };

@@ -155,3 +155,21 @@ describe('BusinessApiClient', () => {
     expect(transport).toHaveBeenCalledTimes(1);
   });
 });
+
+test('幂等键通过专用选项发送，不覆盖既有业务凭证，非法键不发送', async () => {
+  const transport = jest.fn().mockResolvedValue(response(200, { data: {} }));
+  const api = new BusinessApiClient({ fetch: transport, getToken: () => 'business' });
+  const key = '00000000-0000-4000-8000-000000000001';
+  await api.request('/teams/t/tasks', {
+    method: 'POST',
+    body: { title: '合成' },
+    idempotencyKey: key,
+  });
+  expect(transport.mock.calls[0][1].headers).toEqual(
+    expect.objectContaining({ 'Idempotency-Key': key, Authorization: 'Bearer business' })
+  );
+  await expect(api.request('/teams/t/tasks', { idempotencyKey: 'bad-key' })).rejects.toMatchObject({
+    code: 'INVALID_KEY',
+  });
+  expect(transport).toHaveBeenCalledTimes(1);
+});

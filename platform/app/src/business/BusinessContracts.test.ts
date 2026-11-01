@@ -19,5 +19,8 @@ test('OHIF用真实描述符工厂注册，并使两个Services类型面共享�
   expect(manager.registeredServiceNames).toContain('businessServices');
   expect(container.session.getSnapshot().status).toBe('unknown');
   expect(Object.hasOwn(container, 'runtime')).toBe(false);
-  expect(container.projectRuntime).toBeUndefined();
+  expect(container.localProjects!.getCurrent()).toBeNull();
+  expect(container.tasks).toBeDefined();
+  expect(container.projectRuntime!.phaseOneMask).toBe(false);
+  expect(container.projectRuntime!.getCurrent()).toBeNull();
 });

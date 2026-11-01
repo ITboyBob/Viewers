@@ -1,4 +1,5 @@
 import dcmjs from 'dcmjs';
+import { cloneDeep } from 'lodash';
 
 import pubSubServiceInterface from '../_shared/pubSubServiceInterface';
 import createStudyMetadata from './createStudyMetadata';
@@ -45,12 +46,56 @@ const EVENTS = {
  *   },
  * ],
  */
-const _model = {
-  studies: [],
-};
+const _baseModel = { studies: [] };
+let _activeScope: { model: typeof _baseModel } | undefined;
+const _getModel = () => _activeScope?.model ?? _baseModel;
+
+/** 先在独立模型构建成功子集，登记成功后方可激活；从不清空原生base。 */
+function prepareLocalImportScope(scopeId: string, datasets: readonly Record<string, unknown>[]) {
+  if (!scopeId || !Array.isArray(datasets) || datasets.length === 0) {
+    throw new Error('本地导入作用域需要有效批次和成功影像');
+  }
+  const model: typeof _baseModel = { studies: [] };
+  for (const dataset of datasets) {
+    if (
+      !dataset ||
+      !['StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID'].every(
+        field => typeof dataset[field] === 'string' && dataset[field].length > 0
+      )
+    ) {
+      throw new Error('本地导入元数据缺少有效UID');
+    }
+    let study = model.studies.find(item => item.StudyInstanceUID === dataset.StudyInstanceUID);
+    if (!study) {
+      study = createStudyMetadata(dataset.StudyInstanceUID);
+      model.studies.push(study);
+    }
+    // 复用原模型的SOP首次项折叠；隔离嵌套metadata，作用域写入不影响输入或base。
+    study.addInstanceToSeries(cloneDeep(dataset));
+  }
+  const scope = { model };
+  let released = false;
+  return {
+    activate() {
+      if (released || (_activeScope && _activeScope !== scope)) {
+        throw new Error('本地导入作用域已释放或存在其他活跃批次');
+      }
+      _activeScope = scope;
+    },
+    release() {
+      if (released) {
+        return;
+      }
+      released = true;
+      if (_activeScope === scope) {
+        _activeScope = undefined;
+      }
+    },
+  };
+}
 
 function _getStudyInstanceUIDs() {
-  return _model.studies.map(aStudy => aStudy.StudyInstanceUID);
+  return _getModel().studies.map(aStudy => aStudy.StudyInstanceUID);
 }
 
 /**
@@ -59,7 +104,7 @@ function _getStudyInstanceUIDs() {
  * @returns {*} A study object
  */
 function _getStudy(StudyInstanceUID) {
-  return _model.studies.find(aStudy => aStudy.StudyInstanceUID === StudyInstanceUID);
+  return _getModel().studies.find(aStudy => aStudy.StudyInstanceUID === StudyInstanceUID);
 }
 
 /**
@@ -70,8 +115,10 @@ function _getStudy(StudyInstanceUID) {
  * @returns {*} A series object
  */
 function _getSeries(StudyInstanceUID, SeriesInstanceUID) {
-  if(!StudyInstanceUID) {
-    const series = _model.studies.map(study => study.series).flat();
+  if (!StudyInstanceUID) {
+    const series = _getModel()
+      .studies.map(study => study.series)
+      .flat();
     return series.find(aSeries => aSeries.SeriesInstanceUID === SeriesInstanceUID);
   }
 
@@ -102,7 +149,7 @@ function _getInstance(StudyInstanceUID, SeriesInstanceUID, SOPInstanceUID) {
 }
 
 function _getInstanceByImageId(imageId) {
-  for (const study of _model.studies) {
+  for (const study of _getModel().studies) {
     for (const series of study.series) {
       for (const instance of series.instances) {
         if (instance.imageId === imageId) {
@@ -155,6 +202,7 @@ function _updateMetadataForSeries(StudyInstanceUID, SeriesInstanceUID, metadata)
 
 const BaseImplementation = {
   EVENTS,
+  prepareLocalImportScope,
   listeners: {},
   addInstance(dicomJSONDatasetOrP10ArrayBuffer) {
     let dicomJSONDataset;
@@ -178,11 +226,11 @@ const BaseImplementation = {
 
     const { StudyInstanceUID } = naturalizedDataset;
 
-    let study = _model.studies.find(study => study.StudyInstanceUID === StudyInstanceUID);
+    let study = _getModel().studies.find(study => study.StudyInstanceUID === StudyInstanceUID);
 
     if (!study) {
-      _model.studies.push(createStudyMetadata(StudyInstanceUID));
-      study = _model.studies[_model.studies.length - 1];
+      _getModel().studies.push(createStudyMetadata(StudyInstanceUID));
+      study = _getModel().studies[_getModel().studies.length - 1];
     }
 
     study.addInstanceToSeries(naturalizedDataset);
@@ -190,12 +238,12 @@ const BaseImplementation = {
   addInstances(instances, madeInClient = false) {
     const { StudyInstanceUID, SeriesInstanceUID } = instances[0];
 
-    let study = _model.studies.find(study => study.StudyInstanceUID === StudyInstanceUID);
+    let study = _getModel().studies.find(study => study.StudyInstanceUID === StudyInstanceUID);
 
     if (!study) {
-      _model.studies.push(createStudyMetadata(StudyInstanceUID));
+      _getModel().studies.push(createStudyMetadata(StudyInstanceUID));
 
-      study = _model.studies[_model.studies.length - 1];
+      study = _getModel().studies[_getModel().studies.length - 1];
     }
 
     study.addInstancesToSeries(instances);
@@ -239,7 +287,7 @@ const BaseImplementation = {
         }
       });
       study.NumberOfStudyRelatedSeries = seriesSummaryMetadata.length;
-      _model.studies.push(study);
+      _getModel().studies.push(study);
     }
 
     seriesSummaryMetadata.forEach(series => {
@@ -257,7 +305,9 @@ const BaseImplementation = {
   addStudy(study) {
     const { StudyInstanceUID } = study;
 
-    const existingStudy = _model.studies.find(study => study.StudyInstanceUID === StudyInstanceUID);
+    const existingStudy = _getModel().studies.find(
+      study => study.StudyInstanceUID === StudyInstanceUID
+    );
 
     if (!existingStudy) {
       const newStudy = createStudyMetadata(StudyInstanceUID);
@@ -270,7 +320,7 @@ const BaseImplementation = {
       newStudy.AccessionNumber = study.AccessionNumber;
       newStudy.NumInstances = study.NumInstances; // todo: Correct naming?
 
-      _model.studies.push(newStudy);
+      _getModel().studies.push(newStudy);
     }
   },
   getStudyInstanceUIDs: _getStudyInstanceUIDs,

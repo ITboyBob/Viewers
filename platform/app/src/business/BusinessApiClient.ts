@@ -37,6 +37,14 @@ export class BusinessApiClient implements BusinessApi {
     if (!url.pathname.startsWith('/api/v1/')) {
       throw new BusinessApiError(0, 'INVALID_PATH', '只允许请求业务接口');
     }
+    if (
+      options.idempotencyKey !== undefined &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        options.idempotencyKey
+      )
+    ) {
+      throw new BusinessApiError(422, 'INVALID_KEY', '登记键格式无效');
+    }
     if (options.signal?.aborted) {
       throw new BusinessApiError(0, 'CANCELLED', '请求已取消');
     }
@@ -46,6 +54,9 @@ export class BusinessApiClient implements BusinessApi {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (token) {
       headers.Authorization = `Bearer ${token}`;
+    }
+    if (options.idempotencyKey !== undefined) {
+      headers['Idempotency-Key'] = options.idempotencyKey;
     }
     if (options.body !== undefined) {
       headers['Content-Type'] = 'application/json';

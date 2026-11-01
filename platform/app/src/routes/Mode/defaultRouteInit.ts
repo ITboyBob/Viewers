@@ -14,7 +14,19 @@ const { getSplitParam } = utils;
  * @returns array of subscriptions to cancel
  */
 export async function defaultRouteInit(
-  { servicesManager, studyInstanceUIDs, dataSource, filters, appConfig }: withAppTypes,
+  {
+    servicesManager,
+    studyInstanceUIDs,
+    dataSource,
+    filters,
+    appConfig,
+  }: {
+    servicesManager: AppTypes.ServicesManager;
+    studyInstanceUIDs: string[];
+    dataSource: ReturnType<AppTypes.ExtensionManager['getActiveDataSourceOrNull']>;
+    filters?: Record<string, string[]>;
+    appConfig?: unknown;
+  },
   hangingProtocolId,
   stageIndex
 ) {
@@ -119,6 +131,9 @@ export async function defaultRouteInit(
     }
 
     promises.forEach(promise => {
+      if (promise.status !== 'fulfilled') {
+        return;
+      }
       const retrieveSeriesMetadataPromise = promise.value;
       if (!Array.isArray(retrieveSeriesMetadataPromise)) {
         return;
