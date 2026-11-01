@@ -1,0 +1,35 @@
+server:
+  port: 8081
+spring:
+  application:
+    name: colla-phase-one
+  datasource:
+    url: jdbc:h2:mem:${colla.database-name};DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: ""
+    hikari:
+      maximum-pool-size: 10
+  sql:
+    init:
+      mode: always
+      schema-locations:
+        - classpath:db/V001__identity.sql
+        - optional:classpath:db/V002__invitations.sql
+        - optional:classpath:db/V003__tasks.sql
+  h2:
+    console:
+      enabled: false
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+      fail-on-trailing-tokens: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+colla:
+  database-name: colla_phase_one
