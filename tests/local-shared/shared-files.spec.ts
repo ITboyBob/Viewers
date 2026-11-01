@@ -8,10 +8,7 @@ import { syntheticSeries } from '../phase-one/syntheticDicom';
 
 type SharedWindow = Window & { services: { businessServices: BusinessServices } };
 
-test('G1：真实登记后原生IDB仅发布成功子集原字节，事务中止不留下ready', async ({
-  page,
-  request,
-}) => {
+test('G1/G2：真实登记、原生IDB事务与BC两阶段参与、配色及失效', async ({ page, request }) => {
   const username = `shared-${randomUUID().slice(0, 8)}`,
     password = 'local-shared-synthetic';
   expect((await request.post('/api/v1/users', { data: { username, password } })).status()).toBe(
@@ -181,4 +178,100 @@ test('G1：真实登记后原生IDB仅发布成功子集原字节，事务中止
     phase: 'ready',
     projectPhase: 'registered',
   });
+
+  const viewer = await page.context().newPage();
+  const viewerName = `viewer-${randomUUID().slice(0, 8)}`;
+  expect(
+    (await request.post('/api/v1/users', { data: { username: viewerName, password } })).status()
+  ).toBe(201);
+  await viewer.goto('/account/login');
+  await viewer.getByLabel('用户名').fill(viewerName);
+  await viewer.getByLabel('密码', { exact: true }).fill(password);
+  await viewer.getByRole('button', { name: '登录', exact: true }).click();
+  await expect(viewer).toHaveURL(/\/local-mask$/);
+  const viewerWrites: string[] = [];
+  viewer.on('request', req => {
+    if (/\/tasks(?:\/|$)/.test(new URL(req.url()).pathname)) {
+      viewerWrites.push(req.method());
+    }
+  });
+  let sourceChecks = 0;
+  page.on('response', res => {
+    if (new URL(res.url()).pathname.endsWith('/auth/sessions/current')) {
+      sourceChecks++;
+    }
+  });
+  const joined = await viewer.evaluate(async taskId => {
+    const shared = (window as unknown as SharedWindow).services.businessServices
+      .localCollaboration!;
+    const participation = shared.createViewerParticipation!(taskId);
+    const loading = await participation.join('loading');
+    const bundle = await shared.files!.read(
+      taskId,
+      loading.batch_id,
+      loading.source_participant_id,
+      new AbortController().signal
+    );
+    const active = await participation.join('active');
+    return {
+      source: loading.source_participant_id,
+      batch: bundle.manifest.batch_id,
+      loadingMembers: loading.members.length,
+      members: active.members.length,
+      self: participation.identity.user.uid,
+      participant: participation.identity.participant_id,
+      colors: active.color_registry,
+      phase: participation.getSnapshot().phase,
+    };
+  }, task.task_id);
+  expect(joined.source).toBe(actual.manifest.source_participant_id);
+  expect(joined.batch).toBe(actual.manifest.batch_id);
+  expect(joined.loadingMembers).toBe(1);
+  expect(joined.members).toBe(2);
+  expect(joined.self).not.toBe(actual.manifest.importer_uid);
+  expect(joined.phase).toBe('active');
+  expect(joined.colors.assignments.map(value => value.color_value)).toEqual(['#2563EB', '#C2410C']);
+  // 故意保持view_ready=false超过15秒：active必须已经开始真实心跳。
+  await viewer.waitForTimeout(16050);
+  expect(
+    await viewer.evaluate(
+      () =>
+        (
+          window as unknown as SharedWindow
+        ).services.businessServices.localCollaboration!.participation!.getSnapshot().phase
+    )
+  ).toBe('active');
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as unknown as SharedWindow
+        ).services.businessServices.localCollaboration!.participation!.getSnapshot().members.length
+    )
+  ).toBe(2);
+  const rejoined = await viewer.evaluate(async taskId => {
+    const shared = (window as unknown as SharedWindow).services.businessServices
+      .localCollaboration!;
+    shared.participation!.close();
+    const next = shared.createViewerParticipation!(taskId);
+    await next.join('loading');
+    const state = await next.join('active');
+    return { participant: next.identity.participant_id, colors: state.color_registry };
+  }, task.task_id);
+  expect(rejoined.participant).not.toBe(joined.participant);
+  expect(rejoined.colors).toEqual(joined.colors);
+  expect(sourceChecks).toBe(4);
+  expect(viewerWrites).toEqual([]);
+  await page.goto('/local-mask');
+  await expect
+    .poll(() =>
+      viewer.evaluate(
+        () =>
+          (
+            window as unknown as SharedWindow
+          ).services.businessServices.localCollaboration!.participation!.getSnapshot().phase
+      )
+    )
+    .toBe('closed');
+  await viewer.close();
 });

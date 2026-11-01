@@ -418,6 +418,7 @@ export interface SharedViewPort {
 }
 export interface LocalCollaborationServices {
   readonly identities: LocalParticipationIdentities;
+  createViewerParticipation?(taskId: string): LocalParticipationPort;
   readonly files?: SharedFilePort;
   readonly publisher?: SharedFilePublicationPort;
   readonly sharedView?: SharedViewPort;

@@ -26,7 +26,7 @@ test('OHIF用真实描述符工厂注册，并使两个Services类型面共享�
   expect(container.projectRuntime!.getCurrent()).toBeNull();
 });
 
-test('共享容器仅在业务开启时装配，缺身份不能创建源且不冒称存储或协议已经实现', () => {
+test('共享容器仅在业务开启时装配，缺身份不能创建源或参与协议', () => {
   const manager = new ServicesManager(undefined);
   manager.registerService(businessServicesRegistration, { enabled: true });
   const shared = manager.services.businessServices!.localCollaboration;
@@ -34,4 +34,6 @@ test('共享容器仅在业务开启时装配，缺身份不能创建源且不�
   expect(shared!.identities.getSource()).toBeNull();
   expect(() => shared!.identities.source({} as never)).toThrow();
   expect(shared!.participation).toBeUndefined();
+  expect(shared!.createViewerParticipation).toEqual(expect.any(Function));
+  expect(() => shared!.createViewerParticipation!('task')).toThrow();
 });

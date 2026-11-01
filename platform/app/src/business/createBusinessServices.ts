@@ -11,7 +11,10 @@ import { CollaborationMockStore } from './mock/CollaborationMockStore';
 import { LocalParticipationIdentity } from './localCollaboration/LocalParticipationIdentity';
 import { SharedFileStore } from './localCollaboration/SharedFileStore';
 import { SharedFilePublisher } from './localCollaboration/SharedFilePublisher';
-import type { SharedFilePort } from '@ohif/core';
+import type { SharedFilePort, LocalChannelPort, LocalClockPort } from '@ohif/core';
+import { LocalParticipationService } from './localCollaboration/LocalParticipationService';
+import { SourceSessionVerifier } from './localCollaboration/SourceSessionVerifier';
+import { routerBasename } from '../utils/publicUrl';
 
 type Dependencies = {
   fetch?: typeof fetch;
@@ -20,6 +23,8 @@ type Dependencies = {
   clock?: () => number;
   sharedFiles?: SharedFilePort;
   basePath?: string;
+  sharingClock?: LocalClockPort;
+  channelFactory?: (name: string) => LocalChannelPort;
 };
 function browserStorage(): Storage | null {
   try {
@@ -80,6 +85,28 @@ export function createBusinessServices(
     teamInvitations: new TeamInvitationService(api),
   };
   if (configuration.enabled) {
+    const basePath = (dependencies.basePath ?? routerBasename).replace(/\/+$/, '') || '/';
+    const sharingClock: LocalClockPort = dependencies.sharingClock ?? {
+      now: () => performance.now(),
+      setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),
+      clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    };
+    const createChannel = (taskId: string): LocalChannelPort => {
+      const name = `colla.local-shared.v1:${JSON.stringify([basePath, taskId])}`;
+      if (dependencies.channelFactory) {
+        return dependencies.channelFactory(name);
+      }
+      const channel = new BroadcastChannel(name);
+      return {
+        postMessage: message => channel.postMessage(message),
+        subscribe: listener => {
+          const receive = (event: MessageEvent<unknown>) => listener(event.data);
+          channel.addEventListener('message', receive);
+          return () => channel.removeEventListener('message', receive);
+        },
+        close: () => channel.close(),
+      };
+    };
     const identities = new LocalParticipationIdentity(
       session,
       localProjects,
@@ -101,11 +128,28 @@ export function createBusinessServices(
         }
       }
     );
-    const files =
-      dependencies.sharedFiles ?? new SharedFileStore({ basePath: dependencies.basePath });
+    const files = dependencies.sharedFiles ?? new SharedFileStore({ basePath });
     services.localCollaboration = {
       identities,
       files,
+      createViewerParticipation: taskId => {
+        const identity = identities.viewer(taskId);
+        let channel: LocalChannelPort | undefined;
+        try {
+          channel = createChannel(taskId);
+          const participation = new LocalParticipationService({
+            identity,
+            channel,
+            clock: sharingClock,
+          });
+          services.localCollaboration!.participation = participation;
+          return participation;
+        } catch (error) {
+          channel?.close();
+          identity.close();
+          throw error;
+        }
+      },
       publisher: new SharedFilePublisher({
         session,
         projects: localProjects,
@@ -114,6 +158,38 @@ export function createBusinessServices(
         generation: () => identityGeneration,
       }),
     };
+    const shared = services.localCollaboration;
+    shared.publisher!.subscribe(() => {
+      const source = identities.getSource();
+      if (
+        !source ||
+        source.getSnapshot().publication_phase !== 'ready' ||
+        shared.participation?.identity === source.identity
+      ) {
+        return;
+      }
+      let channel: LocalChannelPort | undefined;
+      try {
+        channel = createChannel(source.task_id);
+        shared.participation = new LocalParticipationService({
+          identity: source.identity,
+          source,
+          channel,
+          clock: sharingClock,
+          verifier: new SourceSessionVerifier({ api, session, identity: source.identity }),
+        });
+      } catch (_error) {
+        channel?.close();
+        source.setPublication('failed', undefined, '此浏览器无法建立本地共享连接');
+      }
+    });
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => {
+        projectRuntime.getHandle()?.deactivate();
+        shared.participation?.close('exit');
+        shared.publisher?.cancel();
+      });
+    }
     const stores = new Map<string, CollaborationMockStore>();
     const storage = dependencies.storage === undefined ? browserStorage() : dependencies.storage;
     services.collaborationMock = {
