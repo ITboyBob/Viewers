@@ -151,7 +151,7 @@ test.each([false, true])(
       releaseScope: jest.fn(),
     });
     props.servicesManager.services.businessServices.localCollaboration = {
-      sharedView: { getModeLifecycle: () => lifecycle, markViewReady: jest.fn() },
+      sharedView: { getModeLifecycle: () => lifecycle, markSetupComplete: jest.fn() },
     };
     const Layout = ({ ViewportGridComp }) => h(ViewportGridComp);
     props.extensionManager.getModuleEntry = () => ({ component: Layout });
@@ -182,11 +182,11 @@ test.each([false, true])(
       deactivate: jest.fn(),
       releaseScope: releaseShared,
     });
-    const markViewReady = jest.fn();
+    const markSetupComplete = jest.fn();
     props.phaseOneMask = false;
     props.sharedView = { task_id: 'task', load_generation: 7, study_uids: ['1'] };
     props.servicesManager.services.businessServices.localCollaboration = {
-      sharedView: { getModeLifecycle: () => lifecycle, markViewReady },
+      sharedView: { getModeLifecycle: () => lifecycle, markSetupComplete },
     };
     let finish: (value: unknown[]) => void;
     (defaultRouteInit as jest.Mock).mockImplementation(
@@ -202,7 +202,7 @@ test.each([false, true])(
     expect(query.getAll('StudyInstanceUIDs')).toEqual(['1']);
     expect(query.get('token')).toBeNull();
     expect(beginOld).not.toHaveBeenCalled();
-    expect(markViewReady).not.toHaveBeenCalled();
+    expect(markSetupComplete).not.toHaveBeenCalled();
     if (exitEarly) {
       view.unmount();
     }
@@ -210,9 +210,9 @@ test.each([false, true])(
       finish!([]);
     });
     if (exitEarly) {
-      expect(markViewReady).not.toHaveBeenCalled();
+      expect(markSetupComplete).not.toHaveBeenCalled();
     } else {
-      expect(markViewReady).toHaveBeenCalledWith(7);
+      expect(markSetupComplete).toHaveBeenCalledWith(7);
       view.unmount();
     }
     expect(releaseShared).toHaveBeenCalledTimes(1);

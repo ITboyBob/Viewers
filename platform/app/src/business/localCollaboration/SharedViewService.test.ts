@@ -169,6 +169,8 @@ test('B两阶段进入保持任务来源，原索引映射到本窗loader；画�
   expect(parse.mock.calls[0][0].files.every(file => file instanceof File)).toBe(true);
   expect(participants[0].join.mock.calls.map(args => args[0])).toEqual(['loading', 'active']);
   expect(scopes[0].activate).toHaveBeenCalledTimes(1);
+  service.markSetupComplete(service.getSnapshot()!.load_generation);
+  expect(service.getSnapshot()!.view_ready).toBe(false);
   service.markViewReady(service.getSnapshot()!.load_generation);
   expect(service.getSnapshot()!.view_ready).toBe(true);
   expect(participants[0].setViewReady).toHaveBeenLastCalledWith(true);
@@ -208,6 +210,8 @@ test('source结束：画面前取消，画面后detached保留scope；B自身失
   const second = setup();
   await second.service.open('task');
   second.service.markViewReady(second.service.getSnapshot()!.load_generation);
+  expect(second.service.getSnapshot()!.view_ready).toBe(false);
+  second.service.markSetupComplete(second.service.getSnapshot()!.load_generation);
   second.participants[0].end();
   expect(second.service.getSnapshot()!.phase).toBe('detached');
   expect(second.scopes[0].release).not.toHaveBeenCalled();
@@ -291,4 +295,17 @@ test('scope激活或释放抛错仍释放本批文件，不保留假完成画面
     local_files: [],
     scope_handle: null,
   });
+});
+
+test('首帧先到仍等setup，旧代次或源关闭后的完成不能复活', async () => {
+  const { service, participants } = setup();
+  await service.open('task');
+  const generation = service.getSnapshot()!.load_generation;
+  service.markViewReady(generation);
+  service.markSetupComplete(generation - 1);
+  expect(service.getSnapshot()!.view_ready).toBe(false);
+  participants[0].end();
+  service.markSetupComplete(generation);
+  expect(service.getSnapshot()).toMatchObject({ phase: 'disposed', view_ready: false });
+  expect(participants[0].setViewReady).not.toHaveBeenCalled();
 });

@@ -50,7 +50,9 @@
     "extensions/cornerstone/src/Viewport/Overlays/RemoteCursor*.ts",
     "extensions/cornerstone/src/Viewport/Overlays/RemoteCursor*.tsx",
     "extensions/cornerstone/src/Viewport/Overlays/remoteCursorProjection.ts",
-    "platform/ui-next/src/components/Header/Header.tsx"
+    "platform/ui-next/src/components/Header/Header.tsx",
+    "extensions/dicom-microscopy/src/DicomMicroscopyViewport.tsx",
+    "extensions/dicom-microscopy/src/utils/sharedViewReady.ts"
   ],
   "exclude": ["node_modules", "dist", "**/*.test.ts"],
   "files": ["platform/app/src/business/BusinessContracts.test.ts"]

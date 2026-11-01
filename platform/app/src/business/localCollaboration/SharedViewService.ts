@@ -30,6 +30,8 @@ type Lease = {
   stopped: boolean;
   released: boolean;
   pendingReady: boolean;
+  setupComplete: boolean;
+  nativeReady: boolean;
   parsed?: ImportBatch;
   scope?: LocalImportScope;
   lifecycle?: ProjectModeLifecycle;
@@ -99,6 +101,8 @@ export class SharedViewService implements SharedViewPort {
       stopped: false,
       released: false,
       pendingReady: false,
+      setupComplete: false,
+      nativeReady: false,
     };
     this.current = lease;
     lease.stopSession = this.dependencies.session.subscribe(() => {
@@ -108,7 +112,7 @@ export class SharedViewService implements SharedViewPort {
         lease.pendingReady &&
         this.dependencies.session.getSnapshot().status === 'authenticated'
       ) {
-        this.markViewReady(lease.generation);
+        this.completeReady(lease.generation);
       }
     });
     lease.stopParticipation = participation.subscribe(() => {
@@ -280,11 +284,26 @@ export class SharedViewService implements SharedViewPort {
       this.releaseLease(lease);
     }
   }
+  markSetupComplete(generation: number) {
+    if (this.current?.generation === generation) {
+      this.current.setupComplete = true;
+      this.completeReady(generation);
+    }
+  }
   markViewReady(generation: number) {
+    if (this.current?.generation === generation) {
+      this.current.nativeReady = true;
+      this.completeReady(generation);
+    }
+  }
+  private completeReady(generation: number) {
     const lease = this.current;
     if (
       !lease ||
       lease.generation !== generation ||
+      !lease.setupComplete ||
+      !lease.nativeReady ||
+      lease.context?.view_ready ||
       lease.stopped ||
       !this.ownSession(lease) ||
       lease.context?.phase !== 'active' ||

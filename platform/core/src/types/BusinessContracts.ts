@@ -412,6 +412,7 @@ export interface SharedViewPort {
   getSnapshot(): SharedViewContext | null;
   subscribe(listener: () => void): () => void;
   open(taskId: string): Promise<void>;
+  markSetupComplete(loadGeneration: number): void;
   markViewReady(loadGeneration: number): void;
   getModeLifecycle(): ProjectModeLifecycle | null;
   dispose(): void;

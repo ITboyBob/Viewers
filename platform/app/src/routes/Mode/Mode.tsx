@@ -408,9 +408,7 @@ export default function ModeRoute({
           mode?.onSetupRouteComplete?.({ servicesManager, extensionManager, commandsManager });
           const shared = servicesManager.services.businessServices?.localCollaboration;
           if (sharedGeneration !== undefined) {
-            shared?.sharedView?.markViewReady(sharedGeneration);
-          } else if (phaseOneMask) {
-            shared?.identities.getSource()?.setViewReady(true);
+            shared?.sharedView?.markSetupComplete(sharedGeneration);
           }
         }
       })

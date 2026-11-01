@@ -6,6 +6,7 @@ import ViewportOverlay from './components/ViewportOverlay';
 import getDicomWebClient from './utils/dicomWebClient';
 import dcmjs from 'dcmjs';
 import { useSystem } from '@ohif/core';
+import { observeSharedViewReady } from './utils/sharedViewReady';
 
 function DicomMicroscopyViewport({
   activeViewportId,
@@ -24,10 +25,10 @@ function DicomMicroscopyViewport({
 }) {
   const { servicesManager, extensionManager } = useSystem();
   const [isLoaded, setIsLoaded] = useState(false);
-  const [viewer, setViewer] = useState(null);
   const [managedViewer, setManagedViewer] = useState(null);
   const overlayElement = useRef();
   const container = useRef();
+  const stopSharedReady = useRef<() => void>();
   const { microscopyService, customizationService } = servicesManager.services;
 
   const overlayData = customizationService.getCustomization('microscopyViewport.overlay');
@@ -35,9 +36,18 @@ function DicomMicroscopyViewport({
   // install the microscopy renderer into the web page.
   // you should only do this once.
   const installOpenLayersRenderer = useCallback(
-    async (container, displaySet) => {
+    async (container, displaySet, nativeLifetime: { active: boolean; release?: () => void }) => {
+      const shared = servicesManager.services.businessServices?.localCollaboration;
+      const source = shared?.identities.getSource();
+      const generation =
+        shared?.participation?.identity.role === 'viewer'
+          ? shared.sharedView?.getSnapshot()?.load_generation
+          : undefined;
       const loadViewer = async metadata => {
         const dicomMicroscopyModule = await microscopyService.importDicomMicroscopyViewer();
+        if (!nativeLifetime.active) {
+          return;
+        }
         const { viewer: DicomMicroscopyViewer, metadata: metadataUtils } = dicomMicroscopyModule;
 
         const microscopyViewer = DicomMicroscopyViewer.VolumeImageViewer;
@@ -148,6 +158,19 @@ function DicomMicroscopyViewport({
           });
         }
 
+        if (shared && nativeLifetime.active) {
+          stopSharedReady.current?.();
+          stopSharedReady.current = observeSharedViewReady(viewer, container, () => {
+            if (!nativeLifetime.active) {
+              return;
+            }
+            if (generation !== undefined) {
+              shared.sharedView?.markViewReady(generation);
+            } else {
+              source?.setViewReady(true);
+            }
+          });
+        }
         viewer.render({ container });
 
         const { StudyInstanceUID, SeriesInstanceUID } = displaySet;
@@ -159,13 +182,13 @@ function DicomMicroscopyViewport({
           StudyInstanceUID,
           SeriesInstanceUID
         );
+        nativeLifetime.release = () => microscopyService.removeViewer(viewer);
 
         managedViewer.addContextMenuCallback((event: Event) => {
           // TODO: refactor this after Bill's changes on ContextMenu feature get merged
           // const roiAnnotationNearBy = this.getNearbyROI(event);
         });
 
-        setViewer(viewer);
         setManagedViewer(managedViewer);
       };
 
@@ -180,7 +203,7 @@ function DicomMicroscopyViewport({
 
       await loadViewer(smDisplaySet.others);
 
-      if (displaySet.Modality === 'SR') {
+      if (nativeLifetime.active && displaySet.Modality === 'SR') {
         displaySet.load(smDisplaySet);
       }
     },
@@ -189,14 +212,19 @@ function DicomMicroscopyViewport({
 
   useEffect(() => {
     const displaySet = displaySets[0];
-    installOpenLayersRenderer(container.current, displaySet).then(() => {
-      setIsLoaded(true);
+    const nativeLifetime: { active: boolean; release?: () => void } = { active: true };
+    installOpenLayersRenderer(container.current, displaySet, nativeLifetime).then(() => {
+      if (nativeLifetime.active) {
+        setIsLoaded(true);
+      }
     });
 
     return () => {
-      if (viewer) {
-        microscopyService.removeViewer(viewer);
-      }
+      nativeLifetime.active = false;
+      stopSharedReady.current?.();
+      const release = nativeLifetime.release;
+      nativeLifetime.release = undefined;
+      release?.();
     };
   }, []);
 

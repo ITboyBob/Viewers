@@ -126,6 +126,38 @@ function LocalSharingCursors({
   useEffect(() => participation?.subscribe(refresh), [participation]);
   const active = participation?.getSnapshot().phase === 'active';
   useEffect(() => {
+    if (!shared || !participation || !active) {
+      return;
+    }
+    const source = shared.identities.getSource();
+    const generation = shared.sharedView?.getSnapshot()?.load_generation;
+    const ready = () => {
+      const nativeServices = servicesManager.services as unknown as {
+        cornerstoneViewportService: {
+          getCornerstoneViewport(id: string): StackViewport | undefined;
+        };
+      };
+      const viewport = nativeServices.cornerstoneViewportService.getCornerstoneViewport(viewportId);
+      if (
+        viewport?.viewportStatus !== Enums.ViewportStatus.RENDERED ||
+        !viewport.getImageData()?.imageData
+      ) {
+        return;
+      }
+      if (participation.identity.role === 'source') {
+        if (!source?.getSnapshot().view_ready) {
+          source?.setViewReady(true);
+        }
+      } else if (generation !== undefined) {
+        shared.sharedView?.markViewReady(generation);
+      }
+    };
+    element.addEventListener(Enums.Events.IMAGE_RENDERED, ready);
+    // 首帧可能早于覆盖层挂载；只接纳原生已完成的渲染状态。
+    ready();
+    return () => element.removeEventListener(Enums.Events.IMAGE_RENDERED, ready);
+  }, [shared, participation, active, element, viewportId, servicesManager]);
+  useEffect(() => {
     if (!business || !shared || !participation || !active) {
       setState(null);
       return;
