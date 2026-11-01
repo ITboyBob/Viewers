@@ -9,10 +9,13 @@ import Local from './Local';
 import Login from './Account/Login';
 import Register from './Account/Register';
 import InviteRoute from './Account/InviteRoute';
+import ProjectRouteBoundary from '../business/ProjectRouteBoundary';
 import BusinessAuthGate, { requiresBusinessAuth } from '../business/BusinessAuthGate';
 import Debug from './Debug';
 import NotFound from './NotFound';
 import buildModeRoutes from './buildModeRoutes';
+import type { ModeRoutesOptions } from './buildModeRoutes';
+import type { BusinessConfiguration } from '@ohif/core';
 import PrivateRoute from './PrivateRoute';
 import PropTypes from 'prop-types';
 import { routerBasename } from '../utils/publicUrl';
@@ -88,12 +91,25 @@ const bakedInRoutes = [
   },
   {
     path: `/local-mask`,
-    children: Local.bind(null, { modePath: 'segmentation/dicomlocal' }),
+    children: Local.bind(null, { modePath: 'segmentation/dicomlocal', phaseOneMask: true }),
   },
 ];
 
 // NOT FOUND (404)
 const notFoundRoute = { component: NotFound };
+
+type RouteConfiguration = {
+  path?: string;
+  private?: boolean;
+  children?: React.ElementType;
+  component?: React.ElementType;
+  props?: Record<string, unknown>;
+};
+type CreateRoutesOptions = ModeRoutesOptions & {
+  showStudyList?: boolean;
+  phaseOneBusiness?: BusinessConfiguration;
+  routerBasename?: string;
+};
 
 const createRoutes = ({
   modes,
@@ -104,7 +120,7 @@ const createRoutes = ({
   hotkeysManager,
   showStudyList,
   phaseOneBusiness,
-}: withAppTypes) => {
+}: CreateRoutesOptions) => {
   const routes =
     buildModeRoutes({
       modes,
@@ -131,7 +147,9 @@ const createRoutes = ({
     props: { children: WorkList, servicesManager, extensionManager },
   };
 
-  const customRoutes = customizationService.getCustomization('routes.customRoutes');
+  const customRoutes = customizationService.getCustomization('routes.customRoutes') as
+    | { routes?: RouteConfiguration[]; notFoundRoute?: RouteConfiguration }
+    | undefined;
 
   const accountRoutes = phaseOneBusiness?.enabled
     ? [
@@ -150,7 +168,7 @@ const createRoutes = ({
     customRoutes?.notFoundRoute || notFoundRoute,
   ];
 
-  function RouteWithErrorBoundary({ route, ...rest }) {
+  function RouteWithErrorBoundary({ route, ...rest }: { route: RouteConfiguration }) {
     const [appConfig] = useAppConfig();
     const { showErrorDetails } = appConfig;
     const location = useLocation();
@@ -167,28 +185,35 @@ const createRoutes = ({
         business?.projectRuntime
       );
 
+    const projectLifecycle =
+      route.private === true && businessProtected
+        ? business?.projectRuntime?.getModeLifecycle()
+        : null;
     history.navigate = useNavigate();
 
     // eslint-disable-next-line react/jsx-props-no-spreading
     return (
-      <BusinessAuthGate
-        enabled={businessProtected}
-        preservePageOnInvalidation={route.private === true}
-      >
-        <ErrorBoundary
-          context={`Route ${route.path}`}
-          showErrorDetails={showErrorDetails}
+      <ProjectRouteBoundary lifecycle={projectLifecycle}>
+        <BusinessAuthGate
+          enabled={businessProtected}
+          preservePageOnInvalidation={route.private === true}
         >
-          <route.children
-            {...rest}
-            {...route.props}
-            route={route}
-            servicesManager={servicesManager}
-            extensionManager={extensionManager}
-            hotkeysManager={hotkeysManager}
-          />
-        </ErrorBoundary>
-      </BusinessAuthGate>
+          <ErrorBoundary
+            context={`Route ${route.path}`}
+            showErrorDetails={showErrorDetails}
+            onError={projectLifecycle ? () => projectLifecycle.dispose() : undefined}
+          >
+            <route.children
+              {...rest}
+              {...route.props}
+              route={route}
+              servicesManager={servicesManager}
+              extensionManager={extensionManager}
+              hotkeysManager={hotkeysManager}
+            />
+          </ErrorBoundary>
+        </BusinessAuthGate>
+      </ProjectRouteBoundary>
     );
   }
 

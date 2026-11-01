@@ -28,6 +28,8 @@ interface HeaderProps {
   WhiteLabeling?: {
     createLogoComponentFn?: (React: any, props: any) => ReactNode;
   };
+  Branding?: ReactNode;
+  LeftActions?: ReactNode;
   PatientInfo?: ReactNode;
   Secondary?: ReactNode;
   UndoRedo?: ReactNode;
@@ -40,6 +42,8 @@ function Header({
   onClickReturnButton,
   isSticky = false,
   WhiteLabeling,
+  Branding,
+  LeftActions,
   PatientInfo,
   UndoRedo,
   Secondary,
@@ -63,18 +67,34 @@ function Header({
         <div className="relative h-[48px] items-center">
           <div className="absolute left-0 top-1/2 flex -translate-y-1/2 items-center">
             <div
+              role="button"
+              aria-label="返回工作列表"
+              aria-disabled={!isReturnEnabled}
+              tabIndex={isReturnEnabled ? 0 : undefined}
               className={classNames(
-                'mr-3 inline-flex items-center',
+                'mr-3 inline-flex items-center border-0 bg-transparent p-0',
                 isReturnEnabled && 'cursor-pointer'
               )}
               onClick={onClickReturn}
+              onKeyDown={event => {
+                if (
+                  event.target === event.currentTarget &&
+                  (event.key === 'Enter' || event.key === ' ')
+                ) {
+                  event.preventDefault();
+                  onClickReturn();
+                }
+              }}
               data-cy="return-to-work-list"
             >
               {isReturnEnabled && <Icons.ArrowLeft className="text-primary ml-1 h-7 w-7" />}
               <div className="ml-1">
-                {WhiteLabeling?.createLogoComponentFn?.(React, props) || <Icons.OHIFLogo />}
+                {Branding === undefined
+                  ? WhiteLabeling?.createLogoComponentFn?.(React, props) || <Icons.OHIFLogo />
+                  : Branding}
               </div>
             </div>
+            {LeftActions}
           </div>
           <div className="absolute top-1/2 left-[250px] h-8 -translate-y-1/2">{Secondary}</div>
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transform">

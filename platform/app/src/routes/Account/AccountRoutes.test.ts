@@ -62,7 +62,16 @@ beforeEach(() => {
   sessionStorage.clear();
   mockServices = createBusinessServices(
     { enabled: true },
-    { fetch: jest.fn().mockResolvedValue(ok()), storage: sessionStorage }
+    {
+      fetch: jest
+        .fn()
+        .mockImplementation(async path =>
+          String(path).includes('/members?')
+            ? { ok: true, status: 200, json: async () => ({ data: [] }) }
+            : ok()
+        ),
+      storage: sessionStorage,
+    }
   );
 });
 afterEach(() => {
@@ -86,15 +95,17 @@ test.each([
   expect(screen.getByLabelText('密码').getAttribute('type')).toBe('password');
 });
 
-test('原注册入口可达，注册成功只到受保护邀请占位，无假完成或发送按钮', async () => {
+test('原注册入口可达，注册成功到受保护真实邀请页，不伪造发送成功', async () => {
   mount('/account/login');
   fireEvent.click(screen.getByRole('link', { name: '注册' }));
   await screen.findByRole('heading', { name: '注册' });
   fill();
   fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-  expect(await screen.findByText('邀请页面待接入')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '是否还有其他人加入你？' })).toBeTruthy();
   expect(screen.getByTestId('route').textContent).toBe('/account/invite');
-  expect(screen.queryByRole('button', { name: /发送|完成|跳过/ })).toBeNull();
+  expect(screen.getByRole('button', { name: '完成' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '跳过' })).toBeTruthy();
+  expect(screen.queryByText(/已加入/)).toBeNull();
 });
 
 test('成功登录固定去导入，basename内相对导航，不接受任意returnUrl', async () => {

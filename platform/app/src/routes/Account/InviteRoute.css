@@ -1,0 +1,13 @@
+/* Figma 53:318 / I53:780;53:659：横向、gap 16、两按钮 FILL。 */
+.account-invite-actions {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 16px;
+}
+.account-invite-actions > button {
+  flex: 1;
+}
+.account-invite-skip {
+  background: #2d343e;
+}

@@ -1,5 +1,37 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
+import { useAppConfig } from '@state';
+import { requiresBusinessAuth } from '../business/BusinessAuthGate';
 import ModeRoute from '@routes/Mode';
+import type { ModeDefinition, ModeRouteProps } from './Mode/Mode';
+export type ModeRoutesOptions = Omit<ModeRouteProps, 'mode' | 'dataSourceName' | 'phaseOneMask'> & {
+  modes: ModeDefinition[];
+  dataSources: Array<{ sourceName: string }>;
+};
+
+function BusinessModeRoute(props: ModeRouteProps) {
+  const [config] = useAppConfig();
+  const location = useLocation();
+  const source =
+    typeof props.dataSourceName === 'string'
+      ? props.dataSourceName
+      : (props.extensionManager.getActiveDataSourceDefinition()?.sourceName ??
+        config.defaultDataSourceName);
+  const phaseOneMask =
+    !!config.phaseOneBusiness?.enabled &&
+    requiresBusinessAuth(
+      location.pathname,
+      source,
+      location.state,
+      props.servicesManager.services.businessServices?.projectRuntime
+    );
+  return (
+    <ModeRoute
+      {...props}
+      phaseOneMask={phaseOneMask}
+    />
+  );
+}
 
 /*
   Routes uniquely define an entry point to:
@@ -28,7 +60,7 @@ export default function buildModeRoutes({
   servicesManager,
   commandsManager,
   hotkeysManager,
-}: withAppTypes) {
+}: ModeRoutesOptions) {
   const routes = [];
   const dataSourceNames = [];
 
@@ -46,7 +78,7 @@ export default function buildModeRoutes({
 
       // TODO move up.
       const children = () => (
-        <ModeRoute
+        <BusinessModeRoute
           mode={mode}
           dataSourceName={dataSourceName}
           extensionManager={extensionManager}
@@ -69,7 +101,7 @@ export default function buildModeRoutes({
 
     // TODO move up.
     const children = () => (
-      <ModeRoute
+      <BusinessModeRoute
         mode={mode}
         extensionManager={extensionManager}
         servicesManager={servicesManager}

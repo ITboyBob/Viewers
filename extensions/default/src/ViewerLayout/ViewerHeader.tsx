@@ -12,10 +12,20 @@ import { Types } from '@ohif/core';
 
 function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }>) {
   const { servicesManager, extensionManager, commandsManager } = useSystem();
-  const { customizationService } = servicesManager.services;
+  const { customizationService, businessServices } = servicesManager.services;
 
   const navigate = useNavigate();
   const location = useLocation();
+  const pathname = location.pathname.replace(/\/$/, '');
+  const source =
+    extensionManager.getActiveDataSourceDefinition()?.sourceName ?? appConfig.defaultDataSourceName;
+  const maskViewer =
+    !!appConfig.phaseOneBusiness?.enabled &&
+    (pathname === '/segmentation/dicomlocal' ||
+      (pathname === '/segmentation' && source === 'dicomlocal') ||
+      (/^\/microscopy(?:\/|$)/.test(pathname) &&
+        (location.state?.phaseOneMask === true ||
+          businessServices?.projectRuntime?.phaseOneMask === true)));
 
   const onClickReturnButton = () => {
     const { pathname } = location;
@@ -84,7 +94,13 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
   return (
     <Header
       menuOptions={menuOptions}
-      isReturnEnabled={!!appConfig.showStudyList}
+      isReturnEnabled={maskViewer || !!appConfig.showStudyList}
+      {...(maskViewer && businessServices?.ui
+        ? {
+            Branding: null,
+            LeftActions: businessServices.ui.renderHeader({ page: 'viewer' }),
+          }
+        : {})}
       onClickReturnButton={onClickReturnButton}
       WhiteLabeling={appConfig.whiteLabeling}
       Secondary={<Toolbar buttonSection="secondary" />}

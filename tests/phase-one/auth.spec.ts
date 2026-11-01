@@ -47,7 +47,7 @@ test('真实API公开注册、owner关联、当前身份与幂等注销，无凭
   ).toBe(401);
 });
 
-test('真实注册到受保护邀请占位，刷新确认；真实登录到导入，注销后拒绝旧凭据', async ({
+test('真实注册到受保护邀请页，刷新确认；真实登录到导入，注销后拒绝旧凭据', async ({
   page,
   request,
 }) => {
@@ -62,9 +62,9 @@ test('真实注册到受保护邀请占位，刷新确认；真实登录到导�
   );
   await page.getByRole('button', { name: '下一步' }).click();
   await expect(page).toHaveURL(/\/account\/invite$/);
-  await expect(page.getByRole('heading', { name: '邀请页面待接入' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '是否还有其他人加入你？' })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('heading', { name: '邀请页面待接入' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '是否还有其他人加入你？' })).toBeVisible();
   await page.goto('/account/login?returnUrl=https://outside.test');
   await fill(page, name);
   await page.getByRole('button', { name: '登录', exact: true }).click();
@@ -125,7 +125,7 @@ test('独立浏览器上下文共享同实例账号团队但不共享标签页To
     await pageA.goto('http://localhost:3336/account/register');
     await fill(pageA, name);
     await pageA.getByRole('button', { name: '下一步' }).click();
-    await expect(pageA.getByRole('heading', { name: '邀请页面待接入' })).toBeVisible();
+    await expect(pageA.getByRole('heading', { name: '是否还有其他人加入你？' })).toBeVisible();
     const tokenA = await storedToken(pageA);
     await pageB.goto('http://localhost:3336/account/login');
     expect(

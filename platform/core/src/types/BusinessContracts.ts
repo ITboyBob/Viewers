@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 /** 一期跨包业务契约：实体只在此定义，app 提供实现。 */
 export type BusinessConfiguration = { enabled: boolean };
 export type BusinessCredentials = { username: string; password: string };
@@ -24,6 +26,7 @@ export type BusinessRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  idempotencyKey?: string;
 };
 export interface BusinessApi {
   request<T>(path: string, options?: BusinessRequestOptions): Promise<T>;
@@ -45,8 +48,131 @@ export interface BusinessSession {
 /** 路由标记不是身份凭证；C 在现有运行时中扩充 project 上下文，不复制该标记。 */
 export type PhaseOneRouteState = { phaseOneMask?: boolean };
 export type BusinessRuntime = Readonly<Required<PhaseOneRouteState>>;
+export type InvitationDecision = 'pending' | 'accepted' | 'rejected';
+export type InvitationView = {
+  invitation_id: string;
+  team_id: string;
+  team_name: string;
+  inviter: BusinessUserSummary;
+  invitee_uid: string;
+  created_at: string;
+  expires_at: string;
+  decision: InvitationDecision;
+  decided_at: string | null;
+};
+export type MemberView = BusinessUserSummary & {
+  role: 'owner' | 'annotator';
+  joined_at: string;
+};
+export interface TeamInvitationApi {
+  send(teamId: string, username: string, signal?: AbortSignal): Promise<InvitationView>;
+  listMembers(teamId: string, signal?: AbortSignal): Promise<MemberView[]>;
+  listNotifications(signal?: AbortSignal): Promise<InvitationView[]>;
+  decide(
+    id: string,
+    decision: Exclude<InvitationDecision, 'pending'>,
+    signal?: AbortSignal
+  ): Promise<InvitationView>;
+}
+export type CollaborationRecipient = BusinessUserSummary & { synthetic: true; in_team: boolean };
+export type MockInvitation = {
+  kind: 'collaboration_mock';
+  mock_id: string;
+  sender_uid: string;
+  recipient_uid: string;
+  recipient_username: string;
+  created_at: number;
+  expires_at: number;
+  decision: InvitationDecision;
+};
+export type NotificationItem = { kind: 'team_join'; invitation: InvitationView } | MockInvitation;
+export interface CollaborationMockApi {
+  readonly recipients: readonly CollaborationRecipient[];
+  list(): MockInvitation[];
+  invite(username: string): MockInvitation;
+  decide(id: string, decision: Exclude<InvitationDecision, 'pending'>): MockInvitation;
+  isInvited(username: string): boolean;
+  getError(): string | null;
+  clockNow(): number;
+}
 export interface BusinessServices {
   api: BusinessApi;
   session: BusinessSession;
-  projectRuntime?: BusinessRuntime;
+  localProjects?: LocalProjects;
+  tasks?: TaskApi;
+  projectRuntime?: ProjectRuntime;
+  teamInvitations?: TeamInvitationApi;
+  collaborationMock?: { forUser(user: BusinessUserSummary): CollaborationMockApi };
+  ui?: { renderHeader(options: { page: 'import' | 'viewer' }): ReactNode };
+}
+
+/** 本地影像及project仅保存在当前页面内存，不进入业务请求或浏览器存储。 */
+export type ImportSelection = {
+  files: readonly File[];
+  kind: 'files' | 'folder';
+  folderName?: string;
+};
+export type BatchSuccess = {
+  readonly selection_index: number;
+  readonly file_name: string;
+  readonly relative_path?: string;
+  readonly image_id: string;
+  readonly study_uid: string;
+  readonly series_uid: string;
+  readonly sop_uid: string;
+  readonly dataset: Record<string, unknown>;
+};
+export type BatchFailure = {
+  selection_index: number;
+  file_name: string;
+  reason: 'PARSE_FAILED' | 'INVALID_DATASET' | 'CLEANUP_FAILED';
+};
+export type ImportBatch = {
+  readonly batch_id: string;
+  readonly kind: 'files' | 'folder';
+  readonly folder_name?: string;
+  readonly successes: readonly BatchSuccess[];
+  readonly failures: readonly BatchFailure[];
+  readonly study_uids: readonly string[];
+};
+export type LocalProject = ImportBatch & {
+  readonly importer_uid: string;
+  readonly team_id: string;
+  readonly title: string;
+  readonly registration_key: string;
+  readonly mode_path: 'segmentation/dicomlocal' | 'microscopy';
+  task_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  phase: 'parsing' | 'ready' | 'registering' | 'registered' | 'invalid' | 'disposed';
+};
+export interface LocalProjects {
+  create(input: ImportSelection, microscopyLoaded?: boolean): Promise<LocalProject | null>;
+  getCurrent(): LocalProject | null;
+  getFailures(): readonly BatchFailure[];
+  isCurrent(project: LocalProject): boolean;
+  dispose(): void;
+}
+
+export type BusinessTask = {
+  task_id: string;
+  team_id: string;
+  title: string;
+  assignee_uid: string;
+  metadata: Record<string, never>;
+  created_at: string;
+  updated_at: string;
+};
+export interface TaskApi {
+  register(project: LocalProject): Promise<BusinessTask>;
+  cancel(project: LocalProject): void;
+}
+export type LocalImportScope = { activate(): void; release(): void };
+export type ProjectLifecycleHandle = { deactivate(): void; releaseScope(): void };
+export type ProjectModeLifecycle = { setNativeExit(exit: () => void): () => void; dispose(): void };
+export interface ProjectRuntime extends BusinessRuntime {
+  bind(project: LocalProject, scope: LocalImportScope): ProjectLifecycleHandle;
+  getCurrent(): LocalProject | null;
+  getHandle(): ProjectLifecycleHandle | null;
+  getModeLifecycle(): ProjectModeLifecycle | null;
 }

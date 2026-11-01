@@ -1,4 +1,5 @@
 import { createBusinessServices } from './createBusinessServices';
+jest.mock('@ohif/core', () => ({ useSystem: jest.fn() }), { virtual: true });
 
 const context = (username = 'alice') => ({
   user: { uid: username, username, avatar_url: null },

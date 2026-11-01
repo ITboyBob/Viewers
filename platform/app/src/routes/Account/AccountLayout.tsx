@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import ohifMark from './assets/ohif-mark.svg';
 import './Account.css';
 
-type Props = React.PropsWithChildren<{ mode: 'login' | 'register' }>;
+type Props = React.PropsWithChildren<{ mode: 'login' | 'register' | 'invite' }>;
 export default function AccountLayout({ mode, children }: Props) {
   const register = mode === 'register';
+  const invite = mode === 'invite';
   return (
     <div className="account-page">
       <header className="account-header">
@@ -28,22 +29,39 @@ export default function AccountLayout({ mode, children }: Props) {
       <main className="account-main">
         <div className="account-content">
           <div className="account-guide">
-            {register && (
+            {(register || invite) && (
               <p className="account-steps">
-                <span>01 创建账号</span>
-                {'    —    02 邀请成员'}
+                {invite ? (
+                  <>
+                    01 创建账号{'    —    '}
+                    <span>02 邀请成员</span>
+                  </>
+                ) : (
+                  <>
+                    <span>01 创建账号</span>
+                    {'    —    02 邀请成员'}
+                  </>
+                )}
               </p>
             )}
-            <h1>欢迎</h1>
-            <p>{register ? '创建账号，下一步邀请团队成员' : '登录后继续你的影像协作'}</p>
+            <h1>{invite ? '是否还有其他人加入你？' : '欢迎'}</h1>
+            <p>
+              {invite
+                ? '输入对方用户名，邀请加入你的团队'
+                : register
+                  ? '创建账号，下一步邀请团队成员'
+                  : '登录后继续你的影像协作'}
+            </p>
           </div>
           {children}
-          <p className="account-switch">
-            {register ? '已有账号？ ' : '还没有账号？ '}
-            <Link to={register ? '/account/login' : '/account/register'}>
-              {register ? '登录' : '注册'}
-            </Link>
-          </p>
+          {!invite && (
+            <p className="account-switch">
+              {register ? '已有账号？ ' : '还没有账号？ '}
+              <Link to={register ? '/account/login' : '/account/register'}>
+                {register ? '登录' : '注册'}
+              </Link>
+            </p>
+          )}
         </div>
       </main>
       <footer className="account-footer">

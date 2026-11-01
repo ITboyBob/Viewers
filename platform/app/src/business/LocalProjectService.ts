@@ -1,0 +1,139 @@
+import type {
+  BusinessSession,
+  BatchFailure,
+  ImportBatch,
+  ImportSelection,
+  LocalProject,
+  LocalProjects,
+} from '@ohif/core';
+import type filesToImportBatch from '../routes/Local/filesToImportBatch';
+
+type Dependencies = {
+  parse?: typeof filesToImportBatch;
+  release?: (batch: ImportBatch) => unknown;
+  identityGeneration?: () => number;
+};
+export class LocalProjectService implements LocalProjects {
+  private release: (batch: ImportBatch) => unknown;
+  private current: LocalProject | null = null;
+  private batch: ImportBatch | null = null;
+  private failures: readonly BatchFailure[] = [];
+  private attempt = 0;
+  private generation = 0;
+  private identity: string | null = null;
+  private credentialGeneration = 0;
+  private projectGeneration = new WeakMap<LocalProject, number>();
+  constructor(
+    private readonly session: BusinessSession,
+    private readonly dependencies: Dependencies = {}
+  ) {
+    this.credentialGeneration = dependencies.identityGeneration?.() ?? 0;
+    this.release = dependencies.release ?? (() => undefined);
+    this.observeIdentity();
+    session.subscribe(() => this.observeIdentity());
+  }
+  private observeIdentity() {
+    const { status, context } = this.session.getSnapshot();
+    // 身份恢复的loading不是账号切换；新的凭证到期时间或退出会废弃旧资格。
+    if (status === 'loading' || status === 'error') {
+      return;
+    }
+    const identity =
+      status === 'authenticated' && context
+        ? JSON.stringify([context.user.uid, context.expires_at])
+        : null;
+    const credentialGeneration = this.dependencies.identityGeneration?.() ?? 0;
+    if (identity !== this.identity || credentialGeneration !== this.credentialGeneration) {
+      this.credentialGeneration = credentialGeneration;
+      this.identity = identity;
+      this.generation++;
+      if (this.current && this.current.phase !== 'disposed') {
+        this.current.phase = 'invalid';
+      }
+    }
+  }
+  private parse = async (input: ImportSelection): Promise<ImportBatch> => {
+    const parser = await import('../routes/Local/filesToImportBatch');
+    this.release = this.dependencies.release ?? parser.releaseImportBatch;
+    return parser.default(input);
+  };
+  async create(input: ImportSelection, microscopyLoaded = false): Promise<LocalProject | null> {
+    const snapshot = this.session.getSnapshot();
+    const { context, currentTeamId } = snapshot;
+    if (
+      snapshot.status !== 'authenticated' ||
+      !context ||
+      !currentTeamId ||
+      !context.memberships.some(member => member.team_id === currentTeamId)
+    ) {
+      throw new Error('请先验证业务身份和团队');
+    }
+    this.dispose();
+    const attempt = this.attempt;
+    const generation = this.generation;
+    const importer_uid = context.user.uid;
+    const batch = await (this.dependencies.parse ?? this.parse)({
+      ...input,
+      files: [...input.files],
+    });
+    if (attempt !== this.attempt || generation !== this.generation) {
+      this.release(batch);
+      return null;
+    }
+    this.failures = batch.failures;
+    if (!batch.successes.length) {
+      this.release(batch);
+      return null;
+    }
+    const title = batch.kind === 'folder' ? batch.folder_name : batch.successes[0].file_name;
+    if (!title || !title.trim() || title.length > 1024) {
+      this.release(batch);
+      throw new Error('首次标题必须非空且不超过1024字符');
+    }
+    const project: LocalProject = {
+      ...batch,
+      importer_uid,
+      team_id: currentTeamId,
+      title,
+      mode_path:
+        microscopyLoaded && batch.successes.some(item => item.dataset.Modality === 'SM')
+          ? 'microscopy'
+          : 'segmentation/dicomlocal',
+      registration_key: crypto.randomUUID(),
+      phase: 'ready',
+    };
+    // 运行期状态可变，批次身份／标题／团队不能在后续重试或事件中改写。
+    for (const key of Object.keys(project).filter(key => key !== 'phase')) {
+      Object.defineProperty(project, key, { writable: false, configurable: false });
+    }
+    this.current = project;
+    this.batch = batch;
+    this.projectGeneration.set(project, generation);
+    return project;
+  }
+  getCurrent = () => this.current;
+  getFailures = () => this.failures;
+  isCurrent = (project: LocalProject): boolean => {
+    const snapshot = this.session.getSnapshot();
+    return (
+      this.current === project &&
+      this.projectGeneration.get(project) === this.generation &&
+      snapshot.status === 'authenticated' &&
+      snapshot.context?.user.uid === project.importer_uid &&
+      project.phase !== 'invalid' &&
+      project.phase !== 'disposed'
+    );
+  };
+  dispose = () => {
+    this.attempt++;
+    this.failures = [];
+    if (this.current) {
+      this.current.phase = 'disposed';
+    }
+    if (this.batch) {
+      this.release(this.batch);
+    }
+    this.batch = null;
+    this.current = null;
+  };
+}
