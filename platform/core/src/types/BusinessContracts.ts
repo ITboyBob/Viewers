@@ -99,6 +99,9 @@ export interface LocalProjects {
   getCurrent(): LocalProject | null;
   getFailures(): readonly BatchFailure[];
   isCurrent(project: LocalProject): boolean;
+  invalidate(project: LocalProject): void;
+  updateTimestamp(project: LocalProject, value: BusinessTaskTimestamp): boolean;
+  subscribe(listener: () => void): () => void;
   dispose(): void;
 }
 
@@ -113,9 +116,11 @@ export type BusinessTask = {
 };
 export interface TaskApi {
   register(project: LocalProject): Promise<BusinessTask>;
+  touch(project: LocalProject, signal: AbortSignal): Promise<BusinessTaskTimestamp>;
   cancel(project: LocalProject): void;
 }
-export type LocalImportScope = { activate(): void; release(): void };
+export type BusinessTaskTimestamp = { task_id: string; updated_at: string };
+export type LocalImportScope = { activate(): void; release(): void; isActive?(): boolean };
 export type ProjectLifecycleHandle = { deactivate(): void; releaseScope(): void };
 export type ProjectModeLifecycle = { setNativeExit(exit: () => void): () => void; dispose(): void };
 export interface ProjectRuntime extends BusinessRuntime {
@@ -123,4 +128,20 @@ export interface ProjectRuntime extends BusinessRuntime {
   getCurrent(): LocalProject | null;
   getHandle(): ProjectLifecycleHandle | null;
   getModeLifecycle(): ProjectModeLifecycle | null;
+  beginMode(services: ProjectAnnotationServices, dataSourceName?: string): () => void;
 }
+export type ProjectEventService = {
+  EVENTS: Record<string, string>;
+  subscribe(event: string, callback: (payload: unknown) => void): { unsubscribe(): void };
+  getMeasurements?(): unknown[];
+  getMeasurement?(uid: string): unknown;
+  getSegmentations?(): unknown[];
+  getSegmentation?(uid: string): unknown;
+};
+export type ProjectAnnotationServices = {
+  measurementService?: ProjectEventService;
+  segmentationService?: ProjectEventService;
+  uiNotificationService?: {
+    show(value: { title: string; message: string; type: 'warning' }): unknown;
+  };
+};

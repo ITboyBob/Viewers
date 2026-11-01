@@ -147,3 +147,44 @@ test('集中API意外同步抛错也必须清除inflight，后续可用同key重
   await expect(service.register(p)).resolves.toEqual(task());
   expect(request).toHaveBeenCalledTimes(2);
 });
+
+test('更新时间仅PATCH空对象，返回狭义ID和时间，不上传事件内容或换标题', async () => {
+  await service.register(p);
+  request.mockClear();
+  const signal = new AbortController().signal;
+  const timestamp = { task_id: taskId, updated_at: '2026-11-01T00:00:00.001Z' };
+  request.mockResolvedValue(timestamp);
+  expect(await service.touch(p, signal)).toEqual(timestamp);
+  expect(request).toHaveBeenCalledWith(`/teams/team/tasks/${taskId}/updated-at`, {
+    method: 'PATCH',
+    body: {},
+    signal,
+  });
+  expect(p.title).toBe('合成.dcm');
+});
+test.each([
+  {},
+  null,
+  [],
+  { task_id: 'other', updated_at: '2026-11-01T00:00:01Z' },
+  { task_id: taskId, updated_at: 'bad' },
+  { task_id: taskId, updated_at: '2026-11-01T00:00:00Z' },
+  { task_id: taskId, updated_at: '2026-11-01T00:00:01Z', title: 'changed' },
+])('更新时间拒绝错ID、非递增时间或额外字段 %#', async value => {
+  await service.register(p);
+  request.mockResolvedValue(value);
+  await expect(service.touch(p, new AbortController().signal)).rejects.toMatchObject({
+    code: 'INVALID_RESPONSE',
+  });
+});
+test('未登记、已失效或已取消不得发出touch', async () => {
+  const controller = new AbortController();
+  await expect(service.touch(p, controller.signal)).rejects.toMatchObject({ code: 'CANCELLED' });
+  await service.register(p);
+  current = false;
+  await expect(service.touch(p, controller.signal)).rejects.toMatchObject({ code: 'CANCELLED' });
+  current = true;
+  controller.abort();
+  await expect(service.touch(p, controller.signal)).rejects.toMatchObject({ code: 'CANCELLED' });
+  expect(request).toHaveBeenCalledTimes(1);
+});

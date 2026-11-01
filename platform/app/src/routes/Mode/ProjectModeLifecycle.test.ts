@@ -173,6 +173,7 @@ test('route.init晚完成立即退订，不再运行defaultRouteInit或旧完成
 });
 test('原生退出抛错仍完成清理并释放scope', async () => {
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  const error = jest.spyOn(console, 'error').mockImplementation(() => {});
   props.mode.onModeExit = () => {
     events.push('mode-exit');
     throw new Error('synthetic');
@@ -180,12 +181,13 @@ test('原生退出抛错仍完成清理并释放scope', async () => {
   try {
     const view = mount();
     await waitFor(() => expect(props.mode.onSetupRouteComplete).toHaveBeenCalled());
-    view.unmount();
+    expect(() => view.unmount()).toThrow('synthetic');
     expect(events).toContain('native-unsubscribe');
     expect(events).toContain('extension-exit');
     expect(store.getStudy('1')).toBeUndefined();
   } finally {
     warn.mockRestore();
+    error.mockRestore();
   }
 });
 

@@ -1,4 +1,4 @@
-import type { BusinessServices } from './BusinessContracts';
+import type { BusinessServices, ProjectEventService } from './BusinessContracts';
 import {
   HangingProtocolService,
   CustomizationService,
@@ -26,6 +26,7 @@ interface Services {
   hangingProtocolService?: HangingProtocolService;
   customizationService?: CustomizationService;
   measurementService?: MeasurementService;
+  segmentationService?: ProjectEventService;
   displaySetService?: DisplaySetService;
   toolbarService?: ToolbarService;
   viewportGridService?: ViewportGridService;

@@ -76,6 +76,7 @@ function prepareLocalImportScope(scopeId: string, datasets: readonly Record<stri
   const scope = { model };
   let released = false;
   return {
+    isActive: () => !released && _activeScope === scope,
     activate() {
       if (released || (_activeScope && _activeScope !== scope)) {
         throw new Error('本地导入作用域已释放或存在其他活跃批次');

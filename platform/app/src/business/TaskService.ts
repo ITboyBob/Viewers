@@ -2,6 +2,7 @@ import type {
   BusinessApi,
   BusinessApiFailure,
   BusinessTask,
+  BusinessTaskTimestamp,
   LocalProject,
   LocalProjects,
   TaskApi,
@@ -123,5 +124,38 @@ export class TaskService implements TaskApi {
   }
   cancel(project: LocalProject) {
     this.flights.get(project)?.controller.abort();
+  }
+  async touch(project: LocalProject, signal: AbortSignal): Promise<BusinessTaskTimestamp> {
+    if (
+      !this.projects.isCurrent(project) ||
+      project.phase !== 'registered' ||
+      !project.task_id ||
+      signal.aborted
+    ) {
+      throw new BusinessApiError(0, 'CANCELLED', '当前项目资格已失效，请重新导入');
+    }
+    const taskId = project.task_id;
+    const value = await this.api.request<unknown>(
+      `/teams/${encodeURIComponent(project.team_id)}/tasks/${encodeURIComponent(taskId)}/updated-at`,
+      { method: 'PATCH', body: {}, signal }
+    );
+    if (signal.aborted || !this.projects.isCurrent(project) || project.task_id !== taskId) {
+      throw new BusinessApiError(0, 'CANCELLED', '忽略旧项目的时间响应');
+    }
+    const data =
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    if (
+      Object.keys(data).length !== 2 ||
+      data.task_id !== taskId ||
+      typeof data.updated_at !== 'string' ||
+      !Number.isFinite(Date.parse(data.updated_at)) ||
+      !project.updated_at ||
+      Date.parse(data.updated_at) <= Date.parse(project.updated_at)
+    ) {
+      throw new BusinessApiError(502, 'INVALID_RESPONSE', '项目时间响应无效');
+    }
+    return { task_id: taskId, updated_at: data.updated_at };
   }
 }

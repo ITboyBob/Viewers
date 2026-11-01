@@ -85,3 +85,8 @@ test('活动数据源优先于默认源，缺失时回退；关闭开关不传�
   open('segmentation/dicomlocal', '/segmentation/dicomlocal');
   expect(screen.getByTestId('mode-marker').textContent).toBe('false');
 });
+test('刷新或旧URL缺少内存project时提示重新导入，同时保留原生Mode入口', () => {
+  open('segmentation/dicomlocal', '/segmentation/dicomlocal');
+  expect(screen.getByRole('status').textContent).toContain('请重新导入');
+  expect(screen.getByTestId('mode-marker')).toBeTruthy();
+});

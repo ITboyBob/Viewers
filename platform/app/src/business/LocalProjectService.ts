@@ -1,5 +1,6 @@
 import type {
   BusinessSession,
+  BusinessTaskTimestamp,
   BatchFailure,
   ImportBatch,
   ImportSelection,
@@ -23,6 +24,14 @@ export class LocalProjectService implements LocalProjects {
   private identity: string | null = null;
   private credentialGeneration = 0;
   private projectGeneration = new WeakMap<LocalProject, number>();
+  private listeners = new Set<() => void>();
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  private emit = () => this.listeners.forEach(listener => listener());
   constructor(
     private readonly session: BusinessSession,
     private readonly dependencies: Dependencies = {}
@@ -49,6 +58,7 @@ export class LocalProjectService implements LocalProjects {
       this.generation++;
       if (this.current && this.current.phase !== 'disposed') {
         this.current.phase = 'invalid';
+        this.emit();
       }
     }
   }
@@ -124,11 +134,32 @@ export class LocalProjectService implements LocalProjects {
       project.phase !== 'disposed'
     );
   };
+  invalidate = (project: LocalProject) => {
+    if (this.current === project && project.phase !== 'disposed') {
+      project.phase = 'invalid';
+      this.emit();
+    }
+  };
+  updateTimestamp = (project: LocalProject, value: BusinessTaskTimestamp): boolean => {
+    if (
+      !this.isCurrent(project) ||
+      project.phase !== 'registered' ||
+      value.task_id !== project.task_id ||
+      !project.updated_at ||
+      !Number.isFinite(Date.parse(value.updated_at)) ||
+      Date.parse(value.updated_at) <= Date.parse(project.updated_at)
+    ) {
+      return false;
+    }
+    project.updated_at = value.updated_at;
+    return true;
+  };
   dispose = () => {
     this.attempt++;
     this.failures = [];
     if (this.current) {
       this.current.phase = 'disposed';
+      this.emit();
     }
     if (this.batch) {
       this.release(this.batch);

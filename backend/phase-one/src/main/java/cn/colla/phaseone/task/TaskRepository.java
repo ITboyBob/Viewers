@@ -26,4 +26,12 @@ public class TaskRepository {
         jdbc.update("INSERT INTO task_registration(uid,registration_key,payload_hash,task_id,created_at) VALUES(?,?,?,?,?)",
             uid, key, hash, task.task_id(), IdentityRepository.utc(task.created_at()));
     }
+    public Optional<TouchTarget> lockForTouch(String teamId, String taskId) {
+        return jdbc.query("SELECT assignee_uid,updated_at FROM task_record WHERE team_id=? AND task_id=? FOR UPDATE",
+            (row, n) -> new TouchTarget(row.getString("assignee_uid"), row.getObject("updated_at", OffsetDateTime.class).toInstant()), teamId, taskId)
+            .stream().findFirst();
+    }
+    public void updateTimestamp(String taskId, java.time.Instant updatedAt) {
+        jdbc.update("UPDATE task_record SET updated_at=? WHERE task_id=?", IdentityRepository.utc(updatedAt), taskId);
+    }
 }
