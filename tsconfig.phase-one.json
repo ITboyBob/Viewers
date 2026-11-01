@@ -38,7 +38,9 @@
     "platform/app/src/routes/buildModeRoutes.tsx",
     "platform/app/src/App.tsx",
     "playwright.phase-one.config.ts",
-    "tests/phase-one/**/*.ts"
+    "tests/phase-one/**/*.ts",
+    "extensions/default/src/ViewerLayout/ViewerHeader.tsx",
+    "platform/ui-next/src/components/Header/Header.tsx"
   ],
   "exclude": ["node_modules", "dist", "**/*.test.ts"],
   "files": ["platform/app/src/business/BusinessContracts.test.ts"]

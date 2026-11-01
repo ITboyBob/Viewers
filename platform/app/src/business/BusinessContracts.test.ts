@@ -3,6 +3,7 @@ import type PublicServices from '../../../core/src/types/Services';
 import type { BusinessServices } from '@ohif/core';
 import type { BusinessServices as TypesExport } from '../../../core/src/types';
 import { businessServicesRegistration } from './createBusinessServices';
+jest.mock('@ohif/core', () => ({ useSystem: jest.fn() }), { virtual: true });
 
 test('OHIF用真实描述符工厂注册，并使两个Services类型面共享同一公共实体', () => {
   const manager = new ServicesManager(undefined);

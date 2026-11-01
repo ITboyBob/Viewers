@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import classnames from 'classnames';
+import { useAppConfig } from '@state';
 import { useNavigate } from 'react-router-dom';
 import { DicomMetadataStore, MODULE_TYPES, useSystem } from '@ohif/core';
 
@@ -47,11 +48,15 @@ const getLoadButton = (onDrop, text, isDir) => {
 
 type LocalProps = {
   modePath: string;
+  phaseOneMask?: boolean;
 };
 
-function Local({ modePath }: LocalProps) {
+function Local({ modePath, phaseOneMask = false }: LocalProps) {
   const { servicesManager } = useSystem();
-  const { customizationService } = servicesManager.services;
+  const { customizationService, businessServices } = servicesManager.services;
+  const [appConfig] = useAppConfig();
+  const showBusinessHeader =
+    phaseOneMask && appConfig.phaseOneBusiness?.enabled && !!businessServices?.ui;
   const navigate = useNavigate();
   const dropzoneRef = useRef();
   const [dropInitiated, setDropInitiated] = React.useState(false);
@@ -118,51 +123,63 @@ function Local({ modePath }: LocalProps) {
   }, []);
 
   return (
-    <Dropzone
-      ref={dropzoneRef}
-      onDrop={acceptedFiles => {
-        setDropInitiated(true);
-        onDrop(acceptedFiles);
-      }}
-      noClick
-    >
-      {({ getRootProps }) => (
-        <div
-          {...getRootProps()}
-          style={{ width: '100%', height: '100%' }}
-        >
-          <div className="flex h-screen w-screen items-center justify-center">
-            <div className="bg-muted border-primary/60 mx-auto space-y-2 rounded-xl border border-dashed py-12 px-12 drop-shadow-md">
-              <div className="flex items-center justify-center">
-                <Icons.OHIFLogoColorDarkBackground className="h-18" />
-              </div>
-              <div className="space-y-2 py-6 text-center">
-                {dropInitiated ? (
-                  <div className="flex flex-col items-center justify-center pt-12">
-                    <LoadingIndicatorProgress className={'h-full w-full bg-black'} />
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-primary pt-0 text-xl">
-                      Drag and drop your DICOM files & folders here <br />
-                      to load them locally.
-                    </p>
-                    <p className="text-muted-foreground text-base">
-                      Note: Your data remains locally within your browser
-                      <br /> and is never uploaded to any server.
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-center gap-2 pt-4">
-                {getLoadButton(onDrop, 'Load files', false)}
-                {getLoadButton(onDrop, 'Load folders', true)}
+    <>
+      {showBusinessHeader && (
+        <div className="business-import-header">
+          {businessServices.ui.renderHeader({ page: 'import' })}
+        </div>
+      )}
+      <Dropzone
+        ref={dropzoneRef}
+        onDrop={acceptedFiles => {
+          setDropInitiated(true);
+          onDrop(acceptedFiles);
+        }}
+        noClick
+      >
+        {({ getRootProps }) => (
+          <div
+            {...getRootProps()}
+            style={{ width: '100%', height: '100%' }}
+          >
+            <div
+              className={classnames(
+                'flex w-screen items-center justify-center',
+                showBusinessHeader ? 'h-[calc(100vh-48px)]' : 'h-screen'
+              )}
+            >
+              <div className="bg-muted border-primary/60 mx-auto space-y-2 rounded-xl border border-dashed py-12 px-12 drop-shadow-md">
+                <div className="flex items-center justify-center">
+                  <Icons.OHIFLogoColorDarkBackground className="h-18" />
+                </div>
+                <div className="space-y-2 py-6 text-center">
+                  {dropInitiated ? (
+                    <div className="flex flex-col items-center justify-center pt-12">
+                      <LoadingIndicatorProgress className={'h-full w-full bg-black'} />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-primary pt-0 text-xl">
+                        Drag and drop your DICOM files & folders here <br />
+                        to load them locally.
+                      </p>
+                      <p className="text-muted-foreground text-base">
+                        Note: Your data remains locally within your browser
+                        <br /> and is never uploaded to any server.
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-center gap-2 pt-4">
+                  {getLoadButton(onDrop, 'Load files', false)}
+                  {getLoadButton(onDrop, 'Load folders', true)}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
-    </Dropzone>
+        )}
+      </Dropzone>
+    </>
   );
 }
 

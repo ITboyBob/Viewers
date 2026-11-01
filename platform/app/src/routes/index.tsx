@@ -88,7 +88,7 @@ const bakedInRoutes = [
   },
   {
     path: `/local-mask`,
-    children: Local.bind(null, { modePath: 'segmentation/dicomlocal' }),
+    children: Local.bind(null, { modePath: 'segmentation/dicomlocal', phaseOneMask: true }),
   },
 ];
 
