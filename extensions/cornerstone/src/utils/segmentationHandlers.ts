@@ -13,6 +13,12 @@ export function setupSegmentationDataModifiedHandler({
   // the debounced callback does an await and in that period of time the event may have
   // been unsubscribed.
   let isUnsubscribed = false;
+  // Invalidate in-flight calculations immediately, rather than waiting for the debounce.
+  const revisions = new Map<string, number>();
+  const { unsubscribe: invalidateUnsubscribe } = segmentationService.subscribe(
+    segmentationService.EVENTS.SEGMENTATION_DATA_MODIFIED,
+    ({ segmentationId }) => revisions.set(segmentationId, (revisions.get(segmentationId) || 0) + 1)
+  );
   const { unsubscribe: debouncedUnsubscribe } = segmentationService.subscribeDebounced(
     segmentationService.EVENTS.SEGMENTATION_DATA_MODIFIED,
     async ({ segmentationId }) => {
@@ -23,6 +29,11 @@ export function setupSegmentationDataModifiedHandler({
       }
 
       const readableText = customizationService.getCustomization('panelSegmentation.readableText');
+      const revision = revisions.get(segmentationId) || 0;
+      const isCurrent = () =>
+        !isUnsubscribed &&
+        (revisions.get(segmentationId) || 0) === revision &&
+        Boolean(segmentationService.getSegmentation(segmentationId));
 
       // Check for segments with bidirectional measurements and update them
       const segmentIndices = Object.keys(segmentation.segments)
@@ -40,13 +51,21 @@ export function setupSegmentationDataModifiedHandler({
         }
       }
 
-      const updatedSegmentation = await updateSegmentationStats({
-        segmentation,
-        segmentationId,
-        readableText,
-      });
+      let updatedSegmentation;
+      try {
+        updatedSegmentation = await updateSegmentationStats({
+          segmentation,
+          segmentationId,
+          readableText,
+          getCurrentSegmentation: () => segmentationService.getSegmentation(segmentationId),
+          isCurrent,
+        });
+      } catch (error) {
+        if (isCurrent()) console.warn('Could not update segmentation statistics:', error);
+        return;
+      }
 
-      if (!isUnsubscribed && updatedSegmentation) {
+      if (isCurrent() && updatedSegmentation) {
         segmentationService.addOrUpdateSegmentation({
           segmentationId,
           segments: updatedSegmentation.segments,
@@ -58,7 +77,9 @@ export function setupSegmentationDataModifiedHandler({
 
   const unsubscribe = () => {
     isUnsubscribed = true;
+    invalidateUnsubscribe();
     debouncedUnsubscribe();
+    revisions.clear();
   };
   return { unsubscribe };
 }

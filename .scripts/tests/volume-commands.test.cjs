@@ -65,20 +65,24 @@ globalThis.__volumeMaskSdk = {
 };
 const hooks = registerHooks({
   resolve(specifier, context, next) {
+    if (specifier === './createMaskProjectCommands')
+      return { url: 'volume-mask:project-commands', shortCircuit: true };
     if (specifier === '@cornerstonejs/core') return { url: 'volume-mask:core', shortCircuit: true };
     if (specifier === '@cornerstonejs/tools')
       return { url: 'volume-mask:tools', shortCircuit: true };
-    if (['./maskAlgorithms', './volumeAlgorithms', './maskOperationEvents'].includes(specifier))
+    if (['./maskAlgorithms', './volumeAlgorithms', './maskOperationEvents', './maskRoi'].includes(specifier))
       return next(`${specifier}.ts`, context);
     return next(specifier, context);
   },
   load(url, context, next) {
+    if (url === 'volume-mask:project-commands')
+      return { format: 'module', shortCircuit: true, source: 'export default () => ({})' };
     if (url === 'volume-mask:core')
       return {
         format: 'module',
         shortCircuit: true,
         source:
-          'export const {StackViewport,VolumeViewport,cache,imageLoader,eventTarget,utilities}=globalThis.__volumeMaskSdk; export const Types={};',
+          'export const {StackViewport,VolumeViewport,cache,imageLoader,eventTarget,utilities}=globalThis.__volumeMaskSdk; export const metaData={get:()=>undefined}; export const Types={};',
       };
     if (url === 'volume-mask:tools')
       return {

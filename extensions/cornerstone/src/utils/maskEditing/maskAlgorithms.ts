@@ -24,7 +24,8 @@ export function thresholdSlice(
   segmentIndex: number,
   lower: number,
   upper: number,
-  replace = true
+  replace = true,
+  selection?: ArrayLike<number>
 ) {
   validateSlice(labels, width, height, segmentIndex);
   if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower > upper) {
@@ -33,8 +34,10 @@ export function thresholdSlice(
   if (intensities.length !== labels.length) {
     throw new Error('原始影像与 Mask 的切片尺寸不一致。');
   }
+  if (selection && selection.length !== labels.length) throw new Error('ROI 尺寸与切片不一致。');
   const result = Uint32Array.from(labels);
   for (let index = 0; index < labels.length; index++) {
+    if (selection && !selection[index]) continue;
     // Another segment is never overwritten, including locked segments.
     if (labels[index] !== 0 && labels[index] !== segmentIndex) {
       continue;

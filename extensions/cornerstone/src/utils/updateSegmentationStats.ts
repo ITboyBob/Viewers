@@ -22,10 +22,14 @@ export async function updateSegmentationStats({
   segmentation,
   segmentationId,
   readableText,
+  getCurrentSegmentation = () => segmentation,
+  isCurrent = () => true,
 }: {
   segmentation: any;
   segmentationId: string;
   readableText: any;
+  getCurrentSegmentation?: () => any;
+  isCurrent?: () => boolean;
 }): Promise<any | null> {
   if (!segmentation) {
     console.debug('No segmentation found for id:', segmentationId);
@@ -47,16 +51,27 @@ export async function updateSegmentationStats({
     mode: 'individual',
   });
 
-  if (!stats) {
+  if (!stats || !isCurrent()) {
     return null;
   }
 
-  const updatedSegmentation = { ...segmentation };
+  const current = getCurrentSegmentation();
+  if (!current) return null;
+  const updatedSegmentation = { ...current, segments: { ...current.segments } };
   let hasUpdates = false;
 
   // Loop through each segment's stats
-  Object.entries(stats).forEach(([segmentIndex, segmentStats]) => {
+  Object.entries(
+    stats as Record<string, { array?: any[]; volume?: { value: any; unit: string } }>
+  ).forEach(([segmentIndex, segmentStats]) => {
     const index = parseInt(segmentIndex);
+    const segment = current.segments[index];
+    // The calculation may finish after undo/delete removed this Mask.
+    if (!segment || !segmentIndices.includes(index) || !segmentStats) return;
+    updatedSegmentation.segments[index] = {
+      ...segment,
+      cachedStats: { ...segment.cachedStats },
+    };
 
     if (!updatedSegmentation.segments[index].cachedStats) {
       updatedSegmentation.segments[index].cachedStats = {};
@@ -64,12 +79,12 @@ export async function updateSegmentationStats({
     }
 
     // Get existing namedStats or initialize if not present
-    const namedStats = updatedSegmentation.segments[index].cachedStats.namedStats || {};
+    const namedStats = { ...updatedSegmentation.segments[index].cachedStats.namedStats };
 
     if (segmentStats.array) {
       segmentStats.array.forEach(stat => {
         // only gather stats that are in the readableText
-        if (!readableText[stat.name]) {
+        if (!stat?.name || !readableText[stat.name]) {
           return;
         }
 
@@ -86,7 +101,7 @@ export async function updateSegmentationStats({
 
       if (readableText.volume) {
         // Add volume if it exists but isn't in the array
-        if (segmentStats.volume && !namedStats.volume) {
+        if (segmentStats.volume) {
           namedStats.volume = {
             name: 'volume',
             label: 'Volume',

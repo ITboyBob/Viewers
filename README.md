@@ -3,8 +3,11 @@
 `codex/mask-tools` 包含基于 OHIF 的阈值、区域生长、画笔、填洞、拆分与三维预览优化。
 小组成员请先阅读 [本地运行与功能说明](MASK_DEMO_README.md)、
 [后端标注与 DICOM 接口需求](BACKEND_API_REQUIREMENTS.md) 和 [OpenAPI 草案](docs/mask-backend.openapi.yaml)。
-接口文档描述后续开发约定，当前本地演示仍使用浏览器内存保存编辑结果。
+接口文档描述后续开发约定，当前本地演示支持 `.ohifmask` 文件保存 / 载入、浏览器本地自动暂存恢复、
+阈值实时预览及三维 ROI，尚未接入后端保存。
 各轮优化的内容、原因与收益见 [优化记录](OPTIMIZATION_LOG.md)。
+最近五轮的详细整理见 [最近五轮优化详细说明](LAST_FIVE_OPTIMIZATIONS.md)。
+公开真实 CT 的验证结果与重跑方式见 [真实 DICOM 测试报告](REAL_DICOM_TEST_REPORT.md)。
 
 ---
 

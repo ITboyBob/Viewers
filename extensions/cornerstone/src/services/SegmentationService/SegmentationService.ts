@@ -789,6 +789,15 @@ class SegmentationService extends PubSubService {
     style: LabelmapStyle | ContourStyle | SurfaceStyle
   ) => {
     cstSegmentation.config.style.setStyle(specifier, style);
+    if (specifier.segmentationId)
+      this._broadcastEvent(this.EVENTS.SEGMENTATION_REPRESENTATION_MODIFIED, {
+        segmentationId: specifier.segmentationId,
+      });
+    else this.getSegmentations().forEach((item: cstTypes.Segmentation) =>
+      this._broadcastEvent(this.EVENTS.SEGMENTATION_REPRESENTATION_MODIFIED, {
+        segmentationId: item.segmentationId,
+      })
+    );
   };
 
   public resetToGlobalStyle = () => {
@@ -1811,7 +1820,7 @@ class SegmentationService extends PubSubService {
 
     const { segments } = segmentation;
 
-    const { cachedStats } = segments[segmentIndex];
+    const cachedStats = segments?.[segmentIndex]?.cachedStats;
 
     if (cachedStats?.center) {
       const { center } = cachedStats;

@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSystem } from '@ohif/core';
 import { useViewportGrid } from '@ohif/ui-next';
-import { StackViewport, VolumeViewport, eventTarget } from '@cornerstonejs/core';
+import { StackViewport, VolumeViewport, eventTarget, metaData } from '@cornerstonejs/core';
 import { Enums as ToolEnums } from '@cornerstonejs/tools';
 import {
   MASK_OPERATION_EVENT,
@@ -11,6 +11,9 @@ import {
 import { useActiveViewportSegmentationRepresentations } from '../hooks/useActiveViewportSegmentationRepresentations';
 import type { MaskSplitPreview } from '../utils/maskEditing/splitMaskTypes';
 import './MaskWorkbench.css';
+import MaskProgressPanel from './MaskProgressPanel';
+import MaskThresholdPreview from './MaskThresholdPreview';
+import { MaskRoi, maskRoiSettings } from '../utils/maskEditing/maskRoi';
 
 const stages = [
   ['threshold', '阈值'],
@@ -47,7 +50,10 @@ export default function MaskEditingTools() {
   const [upper, setUpper] = useState('2000');
   const [replace, setReplace] = useState(true);
   const [scope, setScope] = useState('series');
+  const [thresholdPreview, setThresholdPreview] = useState(false);
+  const [roi, setRoi] = useState<MaskRoi>();
   const [busy, setBusy] = useState(false);
+  const projectInput = useRef<HTMLInputElement>(null);
   const [regionArmed, setRegionArmed] = useState(false);
   const [splitScope, setSplitScope] = useState('series');
   const [minimumVoxels, setMinimumVoxels] = useState('1');
@@ -66,6 +72,9 @@ export default function MaskEditingTools() {
   const displaySetId =
     grid?.activeViewportId &&
     viewportGridService.getDisplaySetsUIDsForViewport(grid.activeViewportId)?.[0];
+  const sourceImageId =
+    displaySetId && displaySetService.getDisplaySetByUID(displaySetId)?.imageIds?.[0];
+  const sourceSeries = sourceImageId && metaData.get('instance', sourceImageId)?.SeriesInstanceUID;
   const canReconstruct = Boolean(
     displaySetId && displaySetService.getDisplaySetByUID(displaySetId)?.isReconstructable
   );
@@ -79,6 +88,22 @@ export default function MaskEditingTools() {
       )
   );
   const buttonClass = 'mask-action';
+
+  useEffect(() => {
+    if (!sourceSeries) return;
+    setRoi(current => (current?.seriesInstanceUID === sourceSeries ? current : undefined));
+  }, [sourceSeries]);
+  useEffect(() => {
+    const imageId =
+      displaySetId && displaySetService.getDisplaySetByUID(displaySetId)?.imageIds?.[0];
+    const series = imageId && metaData.get('instance', imageId)?.SeriesInstanceUID;
+    if (!series) return;
+    if (roi) maskRoiSettings.set(series, roi);
+    else maskRoiSettings.delete(series);
+    return () => {
+      maskRoiSettings.delete(series);
+    };
+  }, [roi, displaySetId, displaySetService]);
 
   useEffect(() => {
     const onStatus = (event: CustomEvent<MaskOperationStatus>) => {
@@ -185,13 +210,15 @@ export default function MaskEditingTools() {
     return range;
   }
 
-  function threshold() {
+  async function threshold() {
     const range = thresholdRange();
     if (!range) return;
-    run(scope === 'series' ? 'thresholdMaskSeries' : 'thresholdMaskSlice', {
+    const result = await run(scope === 'series' ? 'thresholdMaskSeries' : 'thresholdMaskSlice', {
       ...range,
       replace,
+      roi,
     });
+    if (result) setThresholdPreview(false);
   }
 
   function selectStage(next: Stage) {
@@ -460,6 +487,20 @@ export default function MaskEditingTools() {
             />
             替换当前 Mask 在所选范围的选区；不勾选则追加
           </label>
+          <MaskThresholdPreview
+            servicesManager={servicesManager}
+            viewportId={grid?.activeViewportId}
+            displaySetId={displaySetId}
+            lower={lower.trim() ? Number(lower) : NaN}
+            upper={upper.trim() ? Number(upper) : NaN}
+            replace={replace}
+            enabled={enabled && stage === 'threshold'}
+            preview={thresholdPreview}
+            setPreview={setThresholdPreview}
+            roi={roi}
+            setRoi={setRoi}
+            busy={busy}
+          />
           <button
             type="button"
             onClick={threshold}
@@ -481,6 +522,11 @@ export default function MaskEditingTools() {
       >
         <h4>Region Grow 区域生长</h4>
         <p className="mask-help">在阈值生成的 Mask 内点选目标，保留它的三维连通区域。</p>
+        {roi && (
+          <p className="mask-help">
+            当前 ROI 限制已启用：只筛选 ROI 内区域，范围外标注保留。可在“阈值”页清除限制。
+          </p>
+        )}
         <button
           type="button"
           aria-pressed={regionArmed}
@@ -620,6 +666,32 @@ export default function MaskEditingTools() {
         className="mask-step-content"
       >
         <h4>Split Mask 拆分</h4>
+        {splitScope === 'series' && (
+          <div className="mb-3 space-y-2">
+            <span className="text-xs text-gray-300">最小区域快捷设置</span>
+            <div className="flex gap-2">
+              {[1, 100, 1000].map(value => (
+                <button
+                  type="button"
+                  key={value}
+                  disabled={!enabled || busy}
+                  aria-label={'最小区域 ' + value + ' 体素'}
+                  aria-pressed={Number(minimumVoxels) === value}
+                  className={buttonClass}
+                  onClick={() => {
+                    discardSplit();
+                    setMinimumVoxels(String(value));
+                  }}
+                >
+                  {value.toLocaleString()} 体素
+                </button>
+              ))}
+            </div>
+            <p className="mask-help">
+              真实影像可能含大量小碎片。区域过多时可先试 1,000 体素；小区域仍保留在原 Mask。
+            </p>
+          </div>
+        )}
         <div className="mb-2 grid grid-cols-2 gap-2">
           <label className="text-xs text-gray-300">
             拆分范围
@@ -760,6 +832,10 @@ export default function MaskEditingTools() {
         )}
       </div>
       <div className="mask-workbench-footer">
+        <MaskProgressPanel
+          busy={busy}
+          run={run}
+        />
         <div className="mask-current-tool">
           当前工具：<strong>{toolLabel}</strong>
         </div>
@@ -781,6 +857,38 @@ export default function MaskEditingTools() {
             重做
           </button>
         </div>
+        <button
+          type="button"
+          className={`${buttonClass} mt-3 w-full`}
+          disabled={busy || !isSliceViewport || !active?.representationData.Labelmap}
+          onClick={() => run('saveMaskProject')}
+        >
+          保存标注文件
+        </button>
+        <input
+          ref={projectInput}
+          type="file"
+          accept=".ohifmask"
+          aria-label="载入本地标注文件"
+          className="hidden"
+          onChange={event => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (file) run('loadMaskProject', { file });
+          }}
+        />
+        <button
+          type="button"
+          className={`${buttonClass} mt-2 w-full`}
+          disabled={busy || !isSliceViewport || !displaySetId}
+          onClick={() => projectInput.current?.click()}
+        >
+          载入标注文件
+        </button>
+        <p className="mask-help">
+          保存当前标注集的选区、空 Mask、名称、颜色、显隐、锁定和外观。继续编辑时，先导入同一组完整
+          DICOM，再载入 .ohifmask 文件；将创建新标注集。此文件不含原始影像或撤销记录。
+        </p>
         <button
           type="button"
           className={`${buttonClass} mt-3 w-full`}
