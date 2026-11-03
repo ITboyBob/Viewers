@@ -4,6 +4,7 @@ import type { BusinessConfiguration, BusinessServices } from '@ohif/core';
 import { BusinessApiClient } from './BusinessApiClient';
 import { LocalProjectService } from './LocalProjectService';
 import { TaskService } from './TaskService';
+import { TeamPageService } from './TeamPageService';
 import { ProjectRuntimeService } from './ProjectRuntimeService';
 import { BusinessSessionService } from './BusinessSessionService';
 import { TeamInvitationService } from './TeamInvitationService';
@@ -87,6 +88,7 @@ export function createBusinessServices(
     teamInvitations: new TeamInvitationService(api),
   };
   if (configuration.enabled) {
+    services.teamPage = new TeamPageService(api);
     const basePath = (dependencies.basePath ?? routerBasename).replace(/\/+$/, '') || '/';
     const sharingClock: LocalClockPort = dependencies.sharingClock ?? {
       now: () => performance.now(),

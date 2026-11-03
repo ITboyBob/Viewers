@@ -95,7 +95,31 @@ export interface CollaborationMockApi {
   getError(): string | null;
   clockNow(): number;
 }
+/** 团队页第一阶段演示读取投影，不扩充真实 BusinessTask 或访问写入。 */
+export type TeamTaskCard = {
+  task_id: string;
+  team_id: string;
+  title: string;
+  subtitle: string;
+  preview_key: 'abdominal-ct' | 'none';
+};
+export type RecentTaskCard = TeamTaskCard & { last_entered_at: string };
+export type TeamTaskList = { items: TeamTaskCard[]; total: number; mock: true };
+export type RecentTaskList = { items: RecentTaskCard[]; total: number; mock: true };
+export type TaskMemberList = {
+  task_id: string;
+  owner_uid: string;
+  members: { uid: string; username: string }[];
+  mock: true;
+};
+export interface TeamPageApi {
+  listTeamTasks(teamId: string, signal?: AbortSignal): Promise<TeamTaskList>;
+  listRecentTasks(signal?: AbortSignal): Promise<RecentTaskList>;
+  listTaskMembers(taskId: string, signal?: AbortSignal): Promise<TaskMemberList>;
+}
+
 export interface BusinessServices {
+  teamPage?: TeamPageApi;
   api: BusinessApi;
   session: BusinessSession;
   localProjects?: LocalProjects;
