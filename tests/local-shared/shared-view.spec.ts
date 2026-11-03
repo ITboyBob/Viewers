@@ -1,3 +1,4 @@
+import { copySharedLink } from './sharedLink';
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { syntheticSeries } from '../phase-one/syntheticDicom';
@@ -34,8 +35,8 @@ async function source(page: Page, request: APIRequestContext) {
       ...sample.files,
     ]);
   expect((await registered).status()).toBe(201);
-  await expect(page.getByRole('link', { name: '共享链接', exact: true })).toBeVisible();
-  const href = await page.getByRole('link', { name: '共享链接', exact: true }).getAttribute('href');
+  await expect(page.getByRole('button', { name: '共享链接', exact: true })).toBeVisible();
+  const href = await copySharedLink(page);
   const original = await page.evaluate(() => {
     const business = (window as unknown as ProjectTestWindow).services.businessServices;
     const project = business.projectRuntime!.getCurrent()!;

@@ -1,5 +1,5 @@
 import React, { useEffect, useReducer } from 'react';
-import { Link } from 'react-router-dom';
+import SharedLinkButton from './SharedLinkButton';
 import type { BusinessServices } from '@ohif/core';
 import useBusinessSession from '../useBusinessSession';
 import MemberOverlay from './MemberOverlay';
@@ -57,14 +57,10 @@ export default function BusinessTopBar({
         />
       )}
       {page === 'viewer' && sharingReady && (
-        <Link
-          className="text-primary px-2 text-xs"
-          to={`/local-shared?task_id=${encodeURIComponent(source.task_id)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          共享链接
-        </Link>
+        <SharedLinkButton
+          key={source.task_id}
+          taskId={source.task_id}
+        />
       )}
     </div>
   );

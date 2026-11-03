@@ -36,7 +36,8 @@
 .business-top-action:focus-visible {
   outline: 2px solid var(--account-primary, #358cfd);
 }
-.business-member-panel {
+.business-member-panel,
+.business-team-panel {
   z-index: 50;
   width: 288px;
   padding: 16px;
@@ -73,6 +74,63 @@
   padding: 8px 0;
   cursor: default;
 }
+.business-member-panel,
+.business-team-panel {
+  max-width: calc(100vw - 16px);
+}
+.business-member-panel .business-member-team-trigger {
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.business-member-team-trigger:hover,
+.business-member-team-trigger[data-state='open'] {
+  background: #358cfd33;
+}
+.business-member-team-trigger:focus-visible {
+  outline: 2px solid var(--account-primary, #358cfd);
+  outline-offset: 2px;
+}
+.business-team-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.business-team-panel {
+  width: 224px;
+  padding: 8px;
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
+}
+.business-team-heading {
+  padding: 4px 8px;
+  font-weight: 500;
+}
+.business-team-hint {
+  margin: 0 8px 8px;
+  color: var(--account-muted, #7db3cf);
+  font-size: 12px;
+  line-height: 20px;
+}
+.business-team-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--account-muted, #7db3cf);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
 .business-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -97,7 +155,8 @@
     sans-serif;
 }
 .business-dialog *,
-.business-member-panel * {
+.business-member-panel *,
+.business-team-panel * {
   box-sizing: border-box;
 }
 .business-dialog--invite {

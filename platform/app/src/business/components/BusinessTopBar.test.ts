@@ -1,5 +1,6 @@
 import React from 'react';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import BusinessTopBar from './BusinessTopBar';
 import { createBusinessServices } from '../createBusinessServices';
 import type { BusinessServices } from '@ohif/core';
@@ -104,3 +105,77 @@ test('浏览器禁用 sessionStorage 时真实服务仍存在，mock fail-closed
     access.mockRestore();
   }
 });
+
+const sharedTask = '12345678-1234-1234-1234-123456789abc';
+const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+function sharingServices(): BusinessServices {
+  const container = services();
+  container.localCollaboration = {
+    publisher: { subscribe: () => () => {} },
+    identities: {
+      getSource: () => ({
+        task_id: sharedTask,
+        getSnapshot: () => ({ publication_phase: 'ready' }),
+      }),
+    },
+    participation: { getSnapshot: () => ({ phase: 'active' }) },
+  } as unknown as BusinessServices['localCollaboration'];
+  return container;
+}
+function sharingTopbar() {
+  return render(
+    h(
+      MemoryRouter,
+      { basename: '/viewer-base', initialEntries: ['/viewer-base/segmentation/dicomlocal'] },
+      h(BusinessTopBar, { page: 'viewer', services: sharingServices() })
+    )
+  );
+}
+afterEach(() => {
+  if (clipboardDescriptor) {
+    Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+  } else {
+    Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+test('共享入口点击复制同源完整URL及basename，不生成新开页链接', async () => {
+  const writeText = jest.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  sharingTopbar();
+  expect(screen.queryByRole('link', { name: '共享链接' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '共享链接' }));
+  await waitFor(() =>
+    expect(writeText).toHaveBeenCalledWith(
+      `http://localhost/viewer-base/local-shared?task_id=${sharedTask}`
+    )
+  );
+  expect(await screen.findByText('已复制')).toBeTruthy();
+});
+
+test.each(['rejected', 'unavailable'])(
+  '剪贴板%s时不伪报成功，提供完整地址手动复制并可重试',
+  async mode => {
+    const writeText = jest.fn().mockRejectedValue(new Error('不能显示原始错误'));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: mode === 'unavailable' ? undefined : { writeText },
+    });
+    sharingTopbar();
+    fireEvent.click(screen.getByRole('button', { name: '共享链接' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('复制失败');
+    expect(screen.queryByText('已复制')).toBeNull();
+    expect((screen.getByLabelText('共享地址（手动复制）') as HTMLInputElement).value).toBe(
+      `http://localhost/viewer-base/local-shared?task_id=${sharedTask}`
+    );
+    expect(screen.queryByText('不能显示原始错误')).toBeNull();
+    const retry = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: retry },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '共享链接' }));
+    expect(await screen.findByText('已复制')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  }
+);

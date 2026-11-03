@@ -1,12 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { BusinessApiError } from '../../business/BusinessApiClient';
 import { useBusinessServices } from '../../business/useBusinessSession';
 import AccountLayout from './AccountLayout';
+import {
+  sharedAuthTaskFromSearch,
+  sharedViewPath,
+} from '../../business/localCollaboration/sharedEntry';
 
 export default function AccountForm({ mode }: { mode: 'login' | 'register' }) {
   const services = useBusinessServices();
   const navigate = useNavigate();
+  const location = useLocation();
+  const sharedTaskId = sharedAuthTaskFromSearch(location.search, location.hash);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
@@ -35,7 +41,11 @@ export default function AccountForm({ mode }: { mode: 'login' | 'register' }) {
         password,
       });
       if (mounted.current && result.status === 'authenticated') {
-        navigate(register ? '/account/invite' : '/local-mask');
+        if (sharedTaskId) {
+          navigate(sharedViewPath(sharedTaskId), { replace: true });
+        } else {
+          navigate(register ? '/account/invite' : '/local-mask');
+        }
       }
     } catch (failure) {
       if (mounted.current) {
@@ -121,7 +131,7 @@ export default function AccountForm({ mode }: { mode: 'login' | 'register' }) {
           data-state={ready ? 'ready' : 'disabled'}
           aria-busy={pending}
         >
-          {pending ? '提交中…' : register ? '下一步' : '登录'}
+          {pending ? '提交中…' : register ? (sharedTaskId ? '注册并进入共享' : '下一步') : '登录'}
         </button>
       </form>
     </AccountLayout>

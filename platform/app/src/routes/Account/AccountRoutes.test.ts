@@ -36,7 +36,7 @@ const fill = () => {
   fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret' } });
 };
 function Location() {
-  return h('div', { 'data-testid': 'route' }, useLocation().pathname);
+  return h('div', { 'data-testid': 'route' }, useLocation().pathname + useLocation().search);
 }
 function mount(path: string, basename = '/') {
   return render(
@@ -53,7 +53,11 @@ function mount(path: string, basename = '/') {
           path: '/account/invite',
           element: h(BusinessAuthGate, { enabled: true }, h(InviteRoute)),
         }),
-        h(Route, { path: '/local-mask', element: h('p', null, '导入目标') })
+        h(Route, { path: '/local-mask', element: h('p', null, '导入目标') }),
+        h(Route, {
+          path: '/local-shared',
+          element: h(BusinessAuthGate, { enabled: true }, h('p', null, '共享目标')),
+        })
       )
     )
   );
@@ -180,4 +184,66 @@ test('原OIDC PrivateRoute职责保持独立，业务开关不能绕过OIDC', ()
   mockOidc = { enabled: false, user: null };
   render(h(PrivateRoute, { handleUnauthenticated: reject }, h('p', null, '原模式')));
   expect(screen.getByText('原模式')).toBeTruthy();
+});
+
+const sharedTask = '12345678-1234-1234-1234-123456789abc';
+const sharedQuery = `?shared_task_id=${sharedTask}`;
+const sharedTarget = `/local-shared?task_id=${sharedTask}`;
+
+test('未登录共享入口只保留合法任务意图，登录后在basename内回到共享页', async () => {
+  mount(sharedTarget, '/viewer-base');
+  await screen.findByRole('heading', { name: '登录' });
+  expect(screen.getByTestId('route').textContent).toBe(`/account/login${sharedQuery}`);
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '登录', exact: true }));
+  expect(await screen.findByText('共享目标')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe(sharedTarget);
+});
+
+test('共享登录与注册互切保留任务，注册后直接进入共享，不走入队邀请', async () => {
+  mount(`/account/login${sharedQuery}`, '/viewer-base');
+  fireEvent.click(screen.getByRole('link', { name: '注册' }));
+  await screen.findByRole('heading', { name: '注册' });
+  expect(screen.getByTestId('route').textContent).toBe(`/account/register${sharedQuery}`);
+  expect(screen.queryByText('创建账号，下一步邀请团队成员')).toBeNull();
+  fireEvent.click(screen.getByRole('link', { name: '登录' }));
+  await screen.findByRole('heading', { name: '登录' });
+  expect(screen.getByTestId('route').textContent).toBe(`/account/login${sharedQuery}`);
+  fireEvent.click(screen.getByRole('link', { name: '注册' }));
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '注册并进入共享' }));
+  expect(await screen.findByText('共享目标')).toBeTruthy();
+  expect(screen.queryByText('是否还有其他人加入你？')).toBeNull();
+});
+
+test('直接打开或刷新后的共享注册URL仍可恢复任务目标', async () => {
+  mount(`/account/register${sharedQuery}`);
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '注册并进入共享' }));
+  expect(await screen.findByText('共享目标')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe(sharedTarget);
+});
+
+test.each([
+  '?shared_task_id=https://outside.test',
+  `?shared_task_id=${sharedTask}&shared_task_id=${sharedTask}`,
+  `?shared_task_id=${sharedTask}&returnUrl=https://outside.test`,
+  `${sharedQuery}#token=forbidden`,
+])('非法分享意图不形成回跳且不传给注册入口：%s', async query => {
+  mount(`/account/login${query}`);
+  expect(screen.getByRole('link', { name: '注册' }).getAttribute('href')).toBe('/account/register');
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '登录', exact: true }));
+  expect(await screen.findByText('导入目标')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe('/local-mask');
+});
+
+test.each([
+  '/local-shared?task_id=invalid',
+  `/local-shared?task_id=${sharedTask}&token=forbidden`,
+  `/local-shared?task_id=${sharedTask}#outside`,
+])('非法共享入口不会把原始参数转发给登录页：%s', async path => {
+  mount(path);
+  await screen.findByRole('heading', { name: '登录' });
+  expect(screen.getByTestId('route').textContent).toBe('/account/login');
 });

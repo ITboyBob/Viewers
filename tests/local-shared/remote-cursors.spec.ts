@@ -1,3 +1,4 @@
+import { copySharedLink } from './sharedLink';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -215,9 +216,9 @@ test('G4：真实Stack双向箭头、变换重投影、固定样式、静止与�
       { name: '坏.dcm', mimeType: 'application/dicom', buffer: Buffer.from('invalid') },
       ...files,
     ]);
-  await expect(page.getByRole('link', { name: '共享链接', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '共享链接', exact: true })).toBeVisible();
   await ready(page);
-  const href = await page.getByRole('link', { name: '共享链接', exact: true }).getAttribute('href');
+  const href = await copySharedLink(page);
   const viewer = await page.context().newPage();
   await viewer.addInitScript(auditViewportEvents);
   const viewerCDP = await viewer.context().newCDPSession(viewer);
@@ -626,9 +627,9 @@ test('CPU Stack在真实完成先于metadata更新时，等待渲染后恢复同
   writer.dict = parsed.dict;
   sample.files[1].buffer = Buffer.from(writer.write());
   await page.getByLabel('导入文件', { exact: true }).setInputFiles(sample.files);
-  await expect(page.getByRole('link', { name: '共享链接', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '共享链接', exact: true })).toBeVisible();
   await ready(page);
-  const href = await page.getByRole('link', { name: '共享链接', exact: true }).getAttribute('href');
+  const href = await copySharedLink(page);
   const viewer = await page.context().newPage();
   await login(viewer, request, 'cpu-peer');
   await viewer.goto(href!);

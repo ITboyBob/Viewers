@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import type { BusinessRuntime, BusinessSession } from '@ohif/core';
+import { sharedLoginPath } from './localCollaboration/sharedEntry';
 import useBusinessSession, { useBusinessServices } from './useBusinessSession';
 
 export function requiresBusinessAuth(
@@ -41,6 +42,7 @@ function ProtectedEntry({
   preservePageOnInvalidation,
 }: GateProps & { session: BusinessSession }) {
   const snapshot = useBusinessSession(session);
+  const location = useLocation();
   const [decision, setDecision] = useState<'pending' | 'granted' | 'invalid' | 'error'>('pending');
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -84,7 +86,7 @@ function ProtectedEntry({
   ) {
     return (
       <Navigate
-        to="/account/login"
+        to={sharedLoginPath(location.pathname, location.search, location.hash)}
         replace
       />
     );

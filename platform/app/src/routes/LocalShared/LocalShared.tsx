@@ -2,17 +2,8 @@ import React, { useEffect, useReducer, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import ModeRoute from '@routes/Mode';
 import type { ModeRoutesOptions } from '../buildModeRoutes';
-export function sharedTaskFromSearch(search: string): string | null {
-  const params = new URLSearchParams(search),
-    entries = [...params.entries()];
-  const taskId = params.get('task_id');
-  return entries.length === 1 &&
-    entries[0][0] === 'task_id' &&
-    taskId &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId)
-    ? taskId
-    : null;
-}
+import { sharedTaskFromSearch } from '../../business/localCollaboration/sharedEntry';
+export { sharedTaskFromSearch } from '../../business/localCollaboration/sharedEntry';
 export default function LocalShared(props: ModeRoutesOptions) {
   const location = useLocation();
   const taskId = location.hash ? null : sharedTaskFromSearch(location.search);

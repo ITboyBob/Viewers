@@ -1,10 +1,17 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import {
+  sharedAuthSearch,
+  sharedAuthTaskFromSearch,
+} from '../../business/localCollaboration/sharedEntry';
 import ohifMark from './assets/ohif-mark.svg';
 import './Account.css';
 
 type Props = React.PropsWithChildren<{ mode: 'login' | 'register' | 'invite' }>;
 export default function AccountLayout({ mode, children }: Props) {
+  const location = useLocation();
+  const sharedTaskId = sharedAuthTaskFromSearch(location.search, location.hash);
+  const authSearch = sharedTaskId ? sharedAuthSearch(sharedTaskId) : '';
   const register = mode === 'register';
   const invite = mode === 'invite';
   return (
@@ -29,7 +36,7 @@ export default function AccountLayout({ mode, children }: Props) {
       <main className="account-main">
         <div className="account-content">
           <div className="account-guide">
-            {(register || invite) && (
+            {((register && !sharedTaskId) || invite) && (
               <p className="account-steps">
                 {invite ? (
                   <>
@@ -48,16 +55,20 @@ export default function AccountLayout({ mode, children }: Props) {
             <p>
               {invite
                 ? '输入对方用户名，邀请加入你的团队'
-                : register
-                  ? '创建账号，下一步邀请团队成员'
-                  : '登录后继续你的影像协作'}
+                : sharedTaskId
+                  ? register
+                    ? '创建账号后进入共享影像'
+                    : '登录后进入共享影像'
+                  : register
+                    ? '创建账号，下一步邀请团队成员'
+                    : '登录后继续你的影像协作'}
             </p>
           </div>
           {children}
           {!invite && (
             <p className="account-switch">
               {register ? '已有账号？ ' : '还没有账号？ '}
-              <Link to={register ? '/account/login' : '/account/register'}>
+              <Link to={`${register ? '/account/login' : '/account/register'}${authSearch}`}>
                 {register ? '登录' : '注册'}
               </Link>
             </p>
