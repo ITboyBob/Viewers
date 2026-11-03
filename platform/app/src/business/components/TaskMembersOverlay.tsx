@@ -27,9 +27,13 @@ function TaskMembersList({
       try {
         const data = await api.listTaskMembers(taskId, controller.signal);
         // 取消只是通知传输层；即便提供器忽略 signal，也不能提交过期结果。
-        if (active) setState({ status: 'ready', api, data });
+        if (active) {
+          setState({ status: 'ready', api, data });
+        }
       } catch (_error) {
-        if (active) setState({ status: 'error', api });
+        if (active) {
+          setState({ status: 'error', api });
+        }
       }
     };
     void load();
@@ -98,7 +102,9 @@ export default function TaskMembersOverlay({ taskId, api, identityKey }: Props) 
   const closedByOutsideRef = useRef(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     // 内容会隔离指针冒泡，需在捕获阶段关闭，且不抢走外部控件焦点。
     const closeOutside = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -115,7 +121,9 @@ export default function TaskMembersOverlay({ taskId, api, identityKey }: Props) 
     <Popover.Root
       open={open}
       onOpenChange={next => {
-        if (next) closedByOutsideRef.current = false;
+        if (next) {
+          closedByOutsideRef.current = false;
+        }
         setOpen(next);
       }}
     >
@@ -149,7 +157,9 @@ export default function TaskMembersOverlay({ taskId, api, identityKey }: Props) 
             closedByOutsideRef.current = true;
           }}
           onCloseAutoFocus={event => {
-            if (closedByOutsideRef.current) event.preventDefault();
+            if (closedByOutsideRef.current) {
+              event.preventDefault();
+            }
           }}
           onDragOver={event => {
             event.preventDefault();

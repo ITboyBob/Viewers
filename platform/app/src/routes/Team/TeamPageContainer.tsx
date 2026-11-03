@@ -31,9 +31,11 @@ function ReadTeamPage({
           props.view === 'team'
             ? await api.listTeamTasks(teamId!, controller.signal)
             : await api.listRecentTasks(controller.signal);
-        if (current) setResult({ api, attempt, state: { status: 'ready', data } });
+        if (current) {
+          setResult({ api, attempt, state: { status: 'ready', data } });
+        }
       } catch (error) {
-        if (current)
+        if (current) {
           setResult({
             api,
             attempt,
@@ -42,6 +44,7 @@ function ReadTeamPage({
               message: error instanceof Error ? error.message : '任务读取失败，请重试。',
             },
           });
+        }
       }
     };
     void load();
@@ -72,27 +75,30 @@ export default function TeamPageContainer({ view, services, ...slots }: Props) {
       team.role === 'owner'
   );
   const props = { ...slots, view, ownedTeam, username: context?.user.username ?? '' };
-  if (!context)
+  if (!context) {
     return (
       <TeamPage
         {...props}
         state={{ status: 'error', message: '请先验证当前会话。' }}
       />
     );
-  if (!services.teamPage)
+  }
+  if (!services.teamPage) {
     return (
       <TeamPage
         {...props}
         state={{ status: 'error', message: '团队页读取服务未装配。' }}
       />
     );
-  if (view === 'team' && !ownedTeam)
+  }
+  if (view === 'team' && !ownedTeam) {
     return (
       <TeamPage
         {...props}
         state={{ status: 'error', message: '无法确认当前用户的默认自有团队。' }}
       />
     );
+  }
   return (
     <ReadTeamPage
       key={JSON.stringify([context.user.uid, context.default_team_id, view])}

@@ -10,7 +10,8 @@ export function requiresBusinessAuth(
   state?: unknown,
   runtime?: BusinessRuntime
 ) {
-  const path = pathname.replace(/\/$/, '');
+  // 与 React Router 允许多个末尾斜线的匹配行为一致，不能绕开同一路由的门禁。
+  const path = pathname.replace(/\/+$/, '');
   if (
     path === '/local-mask' ||
     path === '/local-shared' ||

@@ -32,7 +32,9 @@ const utc = (value: unknown): value is string => {
 // ISO UTC 同一秒内按原始小数位比较，避免 Date.parse 截断到毫秒改变排序。
 const compareUtc = (left: string, right: string): number => {
   const seconds = left.slice(0, 19).localeCompare(right.slice(0, 19));
-  if (seconds !== 0) return seconds;
+  if (seconds !== 0) {
+    return seconds;
+  }
   const a = left.slice(19, -1).replace(/^\./, '');
   const b = right.slice(19, -1).replace(/^\./, '');
   const length = Math.max(a.length, b.length);

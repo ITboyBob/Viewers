@@ -1,4 +1,3 @@
-/// <reference path="./assets.d.ts" />
 import React from 'react';
 import { GridIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
 import type { BusinessTeamMembership, RecentTaskList, TeamTaskList } from '@ohif/core';

@@ -49,7 +49,9 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
 /** 受既有业务路由门禁保护；页面不创建账号、任务或协作邀请存储。 */
 export default function TeamPageRoute({ view }: { view: TeamPageView }) {
   const services = useBusinessServices();
-  if (!services) return <div role="alert">业务服务尚未初始化，无法读取团队页。</div>;
+  if (!services) {
+    return <div role="alert">业务服务尚未初始化，无法读取团队页。</div>;
+  }
   return (
     <ConnectedTeamPage
       view={view}

@@ -34,6 +34,8 @@
     "platform/app/src/business/**/*.tsx",
     "platform/app/src/routes/Account/**/*.ts",
     "platform/app/src/routes/Account/**/*.tsx",
+    "platform/app/src/routes/Team/**/*.ts",
+    "platform/app/src/routes/Team/**/*.tsx",
     "platform/app/src/routes/index.tsx",
     "platform/app/src/routes/buildModeRoutes.tsx",
     "platform/app/src/routes/Local/**/*.ts",

@@ -204,3 +204,10 @@ test('mask范围与原生Local、远端模式及microscopy标记边界精确', (
     true
   );
 });
+
+test('团队路由的全部末尾斜线变体都必须受业务身份门禁保护', () => {
+  for (const path of ['/team/tasks/', '/team/tasks//', '/team/recent///']) {
+    expect(requiresBusinessAuth(path)).toBe(true);
+  }
+  expect(requiresBusinessAuth('/team/tasks/unrelated')).toBe(false);
+});
