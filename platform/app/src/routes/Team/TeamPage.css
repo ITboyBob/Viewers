@@ -1,0 +1,235 @@
+@import '../Account/Account.css';
+@import '../../business/components/BusinessFonts.css';
+
+/* Figma 团队页两个根：110:1075、133:1164；成员按更新规范迁到团队空间左边。 */
+.team-page .account-header {
+  min-height: 64px;
+  height: auto;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.team-page-space {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 32px 0 24px;
+  color: var(--account-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.team-page-workspace {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.team-page-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  flex: 0 0 264px;
+  width: 264px;
+  padding: 24px 16px;
+  background: var(--account-card);
+}
+.team-page-notifications {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  gap: 8px;
+}
+.team-page-notifications > * {
+  flex: 1;
+}
+.team-page-team-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 12px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.team-page-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 72px;
+  width: 72px;
+  height: 72px;
+  border-radius: 36px;
+  background: #358cfd33;
+  color: var(--account-accent);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 48px;
+}
+.team-page-initial-small {
+  flex-basis: 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.team-page-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.team-page-navigation button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--account-muted);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.team-page-navigation svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.team-page-navigation button[aria-current='page'] {
+  background: #358cfd33;
+  color: var(--account-text);
+  font-weight: 500;
+  line-height: 20px;
+}
+.team-page-navigation button[aria-current='page'] svg {
+  color: var(--account-accent);
+}
+.team-page-navigation button:disabled {
+  cursor: not-allowed;
+}
+.team-page-navigation button:focus-visible,
+.team-page-refresh:focus-visible {
+  outline: 2px solid var(--account-accent);
+  outline-offset: 2px;
+}
+.team-page-main {
+  display: flex;
+  flex: 1 1 416px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 40px;
+  padding: 40px 48px;
+}
+.team-page-team-heading {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.team-page-team-description {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.team-page-team-description h1 {
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 48px;
+  overflow-wrap: anywhere;
+}
+.team-page-team-description p {
+  color: var(--account-muted);
+}
+.team-page-task-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.team-page-list-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.team-page-list-heading h1,
+.team-page-list-heading h2 {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+}
+.team-page-count {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #358cfd33;
+  color: var(--account-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.team-page-refresh {
+  padding: 2px 8px;
+  border: 1px solid #252a74;
+  border-radius: 4px;
+  background: var(--account-card);
+  color: var(--account-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.team-page-cards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 24px;
+}
+.team-page-card {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 320px;
+  width: 320px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid #252a74;
+  border-radius: 8px;
+  background: var(--account-card);
+  overflow: hidden;
+}
+.team-page-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  background: var(--account-canvas);
+  color: var(--account-muted);
+}
+.team-page-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.team-page-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 20px 20px;
+  overflow-wrap: anywhere;
+}
+.team-page-card-info h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.team-page-card-info p {
+  color: var(--account-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.team-page-demo {
+  color: var(--account-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
