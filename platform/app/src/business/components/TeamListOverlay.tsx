@@ -3,9 +3,6 @@ import * as Popover from '@radix-ui/react-popover';
 import { CheckIcon, ChevronRightIcon, HomeIcon } from '@radix-ui/react-icons';
 import type { BusinessTeamMembership } from '@ohif/core';
 
-// 本地展示数据，不代表会话中的真实团队，也不参与任务归属或团队切换。
-const placeholderTeams = ['团队 A', '团队 B'];
-
 export default function TeamListOverlay({
   contentRef,
   suppressCloseFocusRef,
@@ -21,7 +18,9 @@ export default function TeamListOverlay({
   useEffect(() => {
     // 窄屏两侧均容不下完整菜单时，改在入口下方展开，不压缩文字或溢出视口。
     const media = window.matchMedia?.('(max-width: 560px)');
-    if (!media) return;
+    if (!media) {
+      return;
+    }
     const update = () => setCompact(media.matches);
     update();
     media.addEventListener('change', update);
@@ -58,7 +57,7 @@ export default function TeamListOverlay({
         <Popover.Content
           ref={contentRef}
           role="menu"
-          aria-label={ownedTeam ? '团队列表' : '团队列表（占位）'}
+          aria-label="团队列表"
           className="business-team-panel shadow-md"
           side={compact ? 'bottom' : 'right'}
           align="start"
@@ -76,7 +75,9 @@ export default function TeamListOverlay({
           onKeyPress={event => event.stopPropagation()}
           onKeyUp={event => event.stopPropagation()}
           onCloseAutoFocus={event => {
-            if (suppressCloseFocusRef.current) event.preventDefault();
+            if (suppressCloseFocusRef.current) {
+              event.preventDefault();
+            }
           }}
           onDrop={event => {
             event.preventDefault();
@@ -102,23 +103,6 @@ export default function TeamListOverlay({
               />
             </button>
           )}
-          <p className="business-team-hint">
-            {ownedTeam ? '示例团队，仅展示，不可切换' : '示例团队，仅供界面预览'}
-          </p>
-          {placeholderTeams.map(name => (
-            <button
-              key={name}
-              type="button"
-              role={ownedTeam ? 'menuitemradio' : 'menuitem'}
-              aria-checked={ownedTeam ? false : undefined}
-              disabled
-              aria-disabled="true"
-              className="business-team-placeholder"
-            >
-              <HomeIcon aria-hidden="true" />
-              {name}
-            </button>
-          ))}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

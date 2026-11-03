@@ -7,6 +7,7 @@ type Props = {
   view: TeamPageView;
   services: BusinessServices;
   onViewChange(view: TeamPageView): void;
+  createTaskSlot?: React.ReactNode;
   memberSlot?: React.ReactNode;
   notificationSlot?: React.ReactNode;
 };
@@ -19,9 +20,10 @@ function ReadTeamPage({
   const [result, setResult] = useState<{
     api: TeamPageApi;
     attempt: number;
+    teamId?: string;
     state: TeamPageState;
   } | null>(null);
-  const teamId = props.ownedTeam?.team_id;
+  const teamId = props.team?.team_id;
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
@@ -32,13 +34,14 @@ function ReadTeamPage({
             ? await api.listTeamTasks(teamId!, controller.signal)
             : await api.listRecentTasks(controller.signal);
         if (current) {
-          setResult({ api, attempt, state: { status: 'ready', data } });
+          setResult({ api, attempt, teamId, state: { status: 'ready', data } });
         }
       } catch (error) {
         if (current) {
           setResult({
             api,
             attempt,
+            teamId,
             state: {
               status: 'error',
               message: error instanceof Error ? error.message : '任务读取失败，请重试。',
@@ -54,7 +57,9 @@ function ReadTeamPage({
     };
   }, [api, props.view, teamId, attempt]);
   const state: TeamPageState =
-    result?.api === api && result.attempt === attempt ? result.state : { status: 'loading' };
+    result?.api === api && result.attempt === attempt && result.teamId === teamId
+      ? result.state
+      : { status: 'loading' };
   return (
     <TeamPage
       {...props}
@@ -68,13 +73,8 @@ function ReadTeamPage({
 export default function TeamPageContainer({ view, services, ...slots }: Props) {
   const snapshot = useBusinessSession(services.session);
   const context = snapshot.status === 'authenticated' ? snapshot.context : null;
-  const ownedTeam = context?.memberships.find(
-    team =>
-      team.team_id === context.default_team_id &&
-      team.owner_uid === context.user.uid &&
-      team.role === 'owner'
-  );
-  const props = { ...slots, view, ownedTeam, username: context?.user.username ?? '' };
+  const team = context?.memberships.find(member => member.team_id === snapshot.currentTeamId);
+  const props = { ...slots, view, team, username: context?.user.username ?? '' };
   if (!context) {
     return (
       <TeamPage
@@ -91,17 +91,17 @@ export default function TeamPageContainer({ view, services, ...slots }: Props) {
       />
     );
   }
-  if (view === 'team' && !ownedTeam) {
+  if (view === 'team' && !team) {
     return (
       <TeamPage
         {...props}
-        state={{ status: 'error', message: '无法确认当前用户的默认自有团队。' }}
+        state={{ status: 'error', message: '无法确认当前页面的团队。' }}
       />
     );
   }
   return (
     <ReadTeamPage
-      key={JSON.stringify([context.user.uid, context.default_team_id, view])}
+      key={JSON.stringify([context.user.uid, view])}
       {...props}
       api={services.teamPage}
     />

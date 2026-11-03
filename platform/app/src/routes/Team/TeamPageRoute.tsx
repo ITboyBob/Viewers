@@ -7,6 +7,7 @@ import NotificationDialog from '../../business/components/NotificationDialog';
 import '../../business/components/BusinessDialogs.css';
 import TeamPageContainer from './TeamPageContainer';
 import type { TeamPageView } from './TeamPage';
+import CreateTaskButton from './CreateTaskButton';
 
 function ConnectedTeamPage({ services, view }: { services: BusinessServices; view: TeamPageView }) {
   const navigate = useNavigate();
@@ -23,11 +24,23 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
       view={view}
       services={services}
       onViewChange={next => navigate(next === 'team' ? '/team/tasks' : '/team/recent')}
+      createTaskSlot={
+        <CreateTaskButton
+          key={`${context?.user.uid}:${view}`}
+          services={services}
+          teamId={
+            view === 'team'
+              ? context?.memberships.find(team => team.team_id === snapshot.currentTeamId)?.team_id
+              : ownedTeam?.team_id
+          }
+        />
+      }
       memberSlot={
         context &&
         ownedTeam && (
           <MemberOverlay
             key={context.user.uid}
+            label="我的"
             user={context.user}
             ownedTeam={ownedTeam}
           />
@@ -46,7 +59,7 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
   );
 }
 
-/** 受既有业务路由门禁保护；页面不创建账号、任务或协作邀请存储。 */
+/** 受既有业务路由门禁保护；创建入口复用已有导入登记服务，不复制账号或协作邀请存储。 */
 export default function TeamPageRoute({ view }: { view: TeamPageView }) {
   const services = useBusinessServices();
   if (!services) {

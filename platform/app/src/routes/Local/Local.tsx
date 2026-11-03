@@ -1,12 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import type {
-  BatchFailure,
-  ImportSelection,
-  LocalImportScope,
-  LocalProject,
-  ProjectLifecycleHandle,
-  SharedFilePublicationPort,
-} from '@ohif/core';
+import type { ImportSelection } from '@ohif/core';
+import useLocalTaskImport from './useLocalTaskImport';
 import { useAppConfig } from '@state';
 import { useNavigate } from 'react-router-dom';
 import { DicomMetadataStore, MODULE_TYPES, useSystem } from '@ohif/core';
@@ -206,156 +200,19 @@ function MaskLocal() {
     customizationService,
     uiNotificationService,
   } = servicesManager.services;
-  const projects = business?.localProjects,
-    tasks = business?.tasks,
-    runtime = business?.projectRuntime;
-  const publisher = business?.localCollaboration?.publisher;
-  const navigate = useNavigate();
-  const mounted = useRef(true),
-    locked = useRef(false),
-    transferred = useRef(false);
-  const projectRef = useRef<LocalProject | null>(null);
-  const publicationRef = useRef<ReturnType<SharedFilePublicationPort['prepare']> | null>(null);
-  const preparedRef = useRef<{ project: LocalProject; scope: LocalImportScope } | null>(null);
-  const [status, setStatus] = React.useState<'idle' | 'parsing' | 'registering'>('idle');
-  const [error, setError] = React.useState('');
-  const [failures, setFailures] = React.useState<readonly BatchFailure[]>([]);
-  const [retryProject, setRetryProject] = React.useState<LocalProject | null>(null);
-  const busy = status !== 'idle';
+  const { run, busy, status, error, setError, failures, retryProject, available } =
+    useLocalTaskImport(
+      business,
+      extensionManager.registeredExtensionIds.includes('@ohif/extension-dicom-microscopy'),
+      uiNotificationService
+    );
   const Loading = customizationService.getCustomization(
     'ui.loadingIndicatorProgress'
   ) as React.ComponentType<{ className?: string }>;
-  const microscopyLoaded = extensionManager.registeredExtensionIds.includes(
-    '@ohif/extension-dicom-microscopy'
-  );
-
   useEffect(() => {
-    mounted.current = true;
     document.body.classList.add('bg-black');
-    return () => {
-      mounted.current = false;
-      document.body.classList.remove('bg-black');
-      if (!transferred.current) {
-        if (projectRef.current) {
-          tasks?.cancel(projectRef.current);
-        }
-        publicationRef.current?.cancel();
-        try {
-          preparedRef.current?.scope.release();
-        } finally {
-          projects?.dispose();
-        }
-      }
-    };
-  }, [projects, tasks, publisher]);
-
-  const register = async (project: LocalProject) => {
-    if (!projects || !tasks || !runtime) {
-      throw new Error('业务服务尚未初始化');
-    }
-    setStatus('registering');
-    if (preparedRef.current?.project !== project) {
-      preparedRef.current?.scope.release();
-      preparedRef.current = {
-        project,
-        scope: DicomMetadataStore.prepareLocalImportScope(
-          project.batch_id,
-          project.successes.map(item => item.dataset)
-        ),
-      };
-    }
-    await tasks.register(project);
-    if (!mounted.current || !projects.isCurrent(project)) {
-      return;
-    }
-    const { scope } = preparedRef.current;
-    let handle: ProjectLifecycleHandle | undefined;
-    try {
-      scope.activate();
-      handle = runtime.bind(project, scope);
-      // 共享存储是独立增量；失败／慢写不阻塞原导航与事件桥接。
-      void publisher?.publish(project).catch(() => undefined);
-      const query = new URLSearchParams();
-      project.study_uids.forEach(uid => query.append('StudyInstanceUIDs', uid));
-      query.append('datasources', 'dicomlocal');
-      transferred.current = true;
-      navigate(`/${project.mode_path}?${query.toString()}`, { state: { phaseOneMask: true } });
-    } catch (error) {
-      transferred.current = false;
-      publisher?.cancel(project);
-      try {
-        if (handle) {
-          handle.releaseScope();
-        } else {
-          scope.release();
-        }
-      } finally {
-        preparedRef.current = null;
-      }
-      throw error;
-    }
-  };
-  const run = async (input?: ImportSelection) => {
-    if (locked.current || transferred.current || !projects || !tasks || !runtime) {
-      return;
-    }
-    locked.current = true;
-    setError('');
-    try {
-      let project = projectRef.current;
-      if (input) {
-        setStatus('parsing');
-        setFailures([]);
-        setRetryProject(null);
-        if (project) {
-          tasks.cancel(project);
-        }
-        preparedRef.current?.scope.release();
-        preparedRef.current = null;
-        projectRef.current = null;
-        publicationRef.current?.cancel();
-        publicationRef.current = publisher?.prepare(input) ?? null;
-        project = await projects.create(input, microscopyLoaded);
-        if (!mounted.current) {
-          publicationRef.current?.cancel();
-          return;
-        }
-        setFailures(projects.getFailures());
-        if (!project) {
-          publicationRef.current?.cancel();
-          setError('本批次没有可用影像或身份已变化，请重新选择。');
-          return;
-        }
-        projectRef.current = project;
-        publicationRef.current?.attach(project);
-        if (project.failures.length) {
-          uiNotificationService?.show({
-            title: '部分文件导入失败',
-            message: project.failures.map(item => item.file_name).join('、'),
-            type: 'warning',
-            duration: 10000,
-          });
-        }
-      }
-      if (project) {
-        await register(project);
-      }
-    } catch (error) {
-      if (mounted.current) {
-        if (!projectRef.current) {
-          publicationRef.current?.cancel();
-        }
-        setError(error instanceof Error ? error.message : '导入或登记失败，请重试');
-        const project = projectRef.current;
-        setRetryProject(project && projects.isCurrent(project) ? project : null);
-      }
-    } finally {
-      locked.current = false;
-      if (mounted.current) {
-        setStatus('idle');
-      }
-    }
-  };
+    return () => document.body.classList.remove('bg-black');
+  }, []);
   const drop = (files: readonly File[], event?: unknown) => {
     try {
       void run(selectionFromDrop(files, event));
@@ -363,7 +220,7 @@ function MaskLocal() {
       setError(error instanceof Error ? error.message : '请选择单一文件夹');
     }
   };
-  if (!projects || !tasks || !runtime) {
+  if (!available) {
     return <div role="alert">业务服务尚未初始化，不能登记影像。</div>;
   }
   return (

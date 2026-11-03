@@ -172,7 +172,11 @@ export type LocalProject = ImportBatch & {
   phase: 'parsing' | 'ready' | 'registering' | 'registered' | 'invalid' | 'disposed';
 };
 export interface LocalProjects {
-  create(input: ImportSelection, microscopyLoaded?: boolean): Promise<LocalProject | null>;
+  create(
+    input: ImportSelection,
+    microscopyLoaded?: boolean,
+    options?: { teamId?: string }
+  ): Promise<LocalProject | null>;
   getCurrent(): LocalProject | null;
   getFailures(): readonly BatchFailure[];
   isCurrent(project: LocalProject): boolean;

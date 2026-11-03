@@ -100,6 +100,12 @@ test('发起时冻结团队和首次标题，保存全部文件而非展示折�
   );
   const pending = service.create(selection);
   snapshot = context('u', 'other');
+  snapshot.context!.memberships.push({
+    team_id: 't',
+    name: '原团队',
+    owner_uid: 'u',
+    role: 'owner',
+  });
   emit();
   finish(batch());
   const project = await pending;
@@ -212,3 +218,43 @@ test('真实集中服务工厂在同账号同到期时间重新登录时更新�
   expect(project.phase).toBe('invalid');
 });
 jest.mock('@ohif/core', () => ({ useSystem: jest.fn() }), { virtual: true });
+
+test('显式目标团队覆盖当前选择，旧调用继续使用当前团队', async () => {
+  snapshot.context!.memberships.push({
+    team_id: 'joined',
+    name: '已加入',
+    owner_uid: 'other',
+    role: 'annotator',
+  });
+  const explicit = await service.create(selection, false, { teamId: 'joined' });
+  expect(explicit!.team_id).toBe('joined');
+  expect(snapshot.currentTeamId).toBe('t');
+  expect((await service.create(selection))!.team_id).toBe('t');
+});
+
+test('非法显式目标不回退，解析前拒绝且不销毁原项目', async () => {
+  const original = await service.create(selection);
+  parse.mockClear();
+  await expect(service.create(selection, false, { teamId: 'unknown' })).rejects.toThrow('团队');
+  expect(parse).not.toHaveBeenCalled();
+  expect(service.isCurrent(original!)).toBe(true);
+});
+
+test('显式目标在解析期间被冻结；成员资格撤销后释放批次', async () => {
+  let finish!: (value: ImportBatch) => void;
+  parse.mockImplementation(
+    () =>
+      new Promise(resolve => {
+        finish = resolve;
+      })
+  );
+  const pending = service.create(selection, false, { teamId: 't' });
+  snapshot = { ...snapshot, currentTeamId: 'other' };
+  finish(batch());
+  expect((await pending)!.team_id).toBe('t');
+  const revoked = service.create(selection, false, { teamId: 't' });
+  snapshot = { ...snapshot, context: { ...snapshot.context!, memberships: [] } };
+  finish(batch());
+  expect(await revoked).toBeNull();
+  expect(release).toHaveBeenCalled();
+});

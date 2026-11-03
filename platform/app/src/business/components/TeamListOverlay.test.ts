@@ -25,20 +25,22 @@ test('真实团队是唯一勾选首行，示例只展示且所有团队均不�
   expect(rows[0].textContent).toContain(ownedTeam.name);
   expect(rows.filter(row => row.getAttribute('aria-checked') === 'true')).toHaveLength(1);
   expect(within(rows[0]).getByLabelText('当前团队')).toBeTruthy();
-  expect(rows.length).toBeGreaterThan(1);
+  expect(rows).toHaveLength(1);
   rows.forEach(row => {
     expect(row.getAttribute('aria-disabled')).toBe('true');
     expect((row as HTMLButtonElement).disabled).toBe(true);
   });
-  expect(within(menu).getByText('示例团队，仅展示，不可切换')).toBeTruthy();
+  expect(within(menu).queryByText(/示例团队/)).toBeNull();
+  expect(within(menu).queryByText('团队 A')).toBeNull();
+  expect(within(menu).queryByText('团队 B')).toBeNull();
 });
 
-test('没有 ownedTeam 时保留旧占位团队内容与可访问标签', () => {
+test('没有自有团队时不伪造占位团队', () => {
   render(h(TeamListOverlay, props()));
   open();
-  const menu = screen.getByRole('menu', { name: '团队列表（占位）' });
-  expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
-  expect(within(menu).getByText('示例团队，仅供界面预览')).toBeTruthy();
+  const menu = screen.getByRole('menu', { name: '团队列表' });
+  expect(within(menu).queryAllByRole('menuitem')).toHaveLength(0);
+  expect(within(menu).queryByText(/示例团队/)).toBeNull();
   expect(within(menu).queryByRole('menuitemradio')).toBeNull();
 });
 

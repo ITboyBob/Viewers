@@ -14,11 +14,12 @@ export type TeamPageState =
   | { status: 'ready'; data: TeamTaskList | RecentTaskList };
 export type TeamPageProps = {
   view: TeamPageView;
-  ownedTeam?: BusinessTeamMembership;
+  team?: BusinessTeamMembership;
   username: string;
   state: TeamPageState;
   onViewChange(view: TeamPageView): void;
   onRefresh?(): void;
+  createTaskSlot?: React.ReactNode;
   memberSlot?: React.ReactNode;
   notificationSlot?: React.ReactNode;
 };
@@ -26,12 +27,13 @@ export type TeamPageProps = {
 /** 只呈现读取投影及切换意图；卡片不入台，不产生真实访问记录。 */
 export default function TeamPage({
   view,
-  ownedTeam,
+  team,
   username,
   state,
   onViewChange,
   onRefresh,
   memberSlot,
+  createTaskSlot,
   notificationSlot,
 }: TeamPageProps) {
   const heading = view === 'team' ? '团队任务' : '最近任务';
@@ -61,7 +63,6 @@ export default function TeamPage({
         aria-label="团队空间导航"
       >
         {memberSlot}
-        <span>团队空间</span>
       </nav>
       <div className="team-page-workspace">
         <aside
@@ -69,7 +70,7 @@ export default function TeamPage({
           aria-label="团队侧栏"
         >
           <div className="team-page-notifications">{notificationSlot}</div>
-          {view === 'team' && ownedTeam && (
+          {view === 'team' && team && (
             <div className="team-page-team-label">
               <span
                 className="team-page-initial team-page-initial-small"
@@ -77,7 +78,7 @@ export default function TeamPage({
               >
                 {initial}
               </span>
-              <span>{ownedTeam.name}</span>
+              <span>{team.name}</span>
             </div>
           )}
           <nav
@@ -112,7 +113,7 @@ export default function TeamPage({
           </nav>
         </aside>
         <main className="team-page-main">
-          {view === 'team' && ownedTeam && (
+          {view === 'team' && team && (
             <div className="team-page-team-heading">
               <span
                 className="team-page-initial"
@@ -121,7 +122,7 @@ export default function TeamPage({
                 {initial}
               </span>
               <div className="team-page-team-description">
-                <h1>{ownedTeam.name}</h1>
+                <h1>{team.name}</h1>
                 <p>影像协作，从这里开始</p>
               </div>
             </div>
@@ -149,6 +150,7 @@ export default function TeamPage({
                   刷新列表
                 </button>
               )}
+              {createTaskSlot}
             </div>
             {state.status === 'loading' && <p role="status">正在加载任务…</p>}
             {state.status === 'error' && (

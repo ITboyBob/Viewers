@@ -86,11 +86,15 @@ const pending = <T>() => {
 };
 afterEach(cleanup);
 
-test('默认自有团队来自已验证会话，不采用当前选中或已加入团队', async () => {
+test('团队标题与查询采用已验证的当前团队，而不是默认自有团队', async () => {
   const state = setup();
   render(h(TeamPageContainer, { view: 'team', services: state.services, onViewChange: jest.fn() }));
   expect(await screen.findByText('团队任务甲')).toBeTruthy();
-  expect(state.api.listTeamTasks).toHaveBeenCalledWith(team, expect.any(AbortSignal));
+  expect(state.api.listTeamTasks).toHaveBeenCalledWith(
+    state.snapshot.currentTeamId,
+    expect.any(AbortSignal)
+  );
+  expect(screen.getByRole('heading', { name: '已加入团队' })).toBeTruthy();
   expect(state.api.listRecentTasks).not.toHaveBeenCalled();
 });
 
@@ -142,6 +146,7 @@ test('换账号即时隐藏旧列表并隔离迟到响应；身份失效不得�
   const signal = state.api.listTeamTasks.mock.calls[0][1] as AbortSignal;
   state.update({
     ...state.snapshot,
+    currentTeamId: '10000000-0000-4000-8000-000000000004',
     context: {
       ...state.snapshot.context!,
       user: { uid: '30000000-0000-4000-8000-000000000002', username: '新用户', avatar_url: null },
@@ -189,7 +194,7 @@ test('读取失败保留错误并可重试，不变成成功空列表', async ()
   expect(state.api.listTeamTasks).toHaveBeenCalledTimes(2);
 });
 
-test('未验证、非自有默认团队与未装配服务均拒绝读取', async () => {
+test('未验证、无成员资格的当前团队与未装配服务均拒绝读取', async () => {
   const state = setup();
   state.update({ ...state.snapshot, status: 'loading' });
   const props = { view: 'team' as const, services: state.services, onViewChange: jest.fn() };
@@ -198,15 +203,17 @@ test('未验证、非自有默认团队与未装配服务均拒绝读取', async
   state.update({
     ...state.snapshot,
     status: 'authenticated',
+    currentTeamId: 'unknown',
     context: {
       ...state.snapshot.context!,
       default_team_id: '10000000-0000-4000-8000-000000000002',
     },
   });
-  expect(screen.getByRole('alert').textContent).toContain('自有团队');
+  expect(screen.getByRole('alert').textContent).toContain('当前页面的团队');
   expect(state.api.listTeamTasks).not.toHaveBeenCalled();
   state.update({
     ...state.snapshot,
+    currentTeamId: team,
     context: { ...state.snapshot.context!, default_team_id: team },
   });
   await screen.findByText('团队任务甲');
@@ -227,6 +234,7 @@ test('已显示的旧账号列表在换号首帧即消失，不等新请求结�
   await screen.findByText('旧账号已显示任务');
   state.update({
     ...state.snapshot,
+    currentTeamId: '10000000-0000-4000-8000-000000000004',
     context: {
       ...state.snapshot.context!,
       user: { uid: '30000000-0000-4000-8000-000000000002', username: '新用户', avatar_url: null },
@@ -272,4 +280,35 @@ test('取消后迟到失败不能覆盖新看板的成功状态', async () => {
   await act(async () => reject(new Error('旧请求失败')));
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByText('非入队最近任务')).toBeTruthy();
+});
+
+test('当前团队改变即时隐藏旧集合但不重挂载创建入口，取消迟到列表', async () => {
+  const state = setup();
+  const next = pending<TeamTaskList>();
+  state.api.listTeamTasks
+    .mockResolvedValueOnce(data('之前的任务'))
+    .mockReturnValueOnce(next.promise);
+  let mounts = 0;
+  function CreateSlot() {
+    React.useEffect(() => {
+      mounts++;
+    }, []);
+    return h('button', null, '创建新任务');
+  }
+  render(
+    h(TeamPageContainer, {
+      view: 'team',
+      services: state.services,
+      onViewChange: jest.fn(),
+      createTaskSlot: h(CreateSlot),
+    })
+  );
+  await screen.findByText('之前的任务');
+  state.update({ ...state.snapshot, currentTeamId: team });
+  expect(screen.queryByText('之前的任务')).toBeNull();
+  expect(screen.getByRole('heading', { name: '林医生的团队' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '创建新任务' })).toBeTruthy();
+  expect(mounts).toBe(1);
+  await act(async () => next.resolve(data('新的任务')));
+  expect(await screen.findByText('新的任务')).toBeTruthy();
 });

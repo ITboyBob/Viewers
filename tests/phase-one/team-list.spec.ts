@@ -43,9 +43,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('占位团队二级菜单在原面板旁展开，键盘分层关闭且不查询、切换或导航', async ({
-  page,
-}, testInfo) => {
+test('团队二级菜单在原面板旁展开，键盘分层关闭且不查询、切换或导航', async ({ page }, testInfo) => {
   await page.goto('/local-mask');
   const member = page.getByRole('button', { name: '成员', exact: true });
   await expect(member).toBeVisible();
@@ -55,7 +53,7 @@ test('占位团队二级菜单在原面板旁展开，键盘分层关闭且不�
     if (new URL(request.url()).pathname.startsWith('/api/v1/')) requests.push(request.url());
   });
   const trigger = page.getByRole('menuitem', { name: '查看你的团队' });
-  const menu = page.getByRole('menu', { name: '团队列表（占位）' });
+  const menu = page.getByRole('menu', { name: '团队列表' });
   await member.click();
   await trigger.click();
   await expect(page.getByRole('dialog', { name: '个人信息' })).toBeVisible();
@@ -64,8 +62,8 @@ test('占位团队二级菜单在原面板旁展开，键盘分层关闭且不�
   const parentBounds = await page.getByRole('dialog', { name: '个人信息' }).boundingBox();
   const childBounds = await menu.boundingBox();
   expect(childBounds!.x).toBeGreaterThanOrEqual(parentBounds!.x + parentBounds!.width);
-  await expect(menu.getByRole('menuitem', { name: '团队 A' })).toBeDisabled();
-  await expect(menu.getByRole('menuitem', { name: '团队 B' })).toBeDisabled();
+  await expect(menu.getByText('团队 A', { exact: true })).toHaveCount(0);
+  await expect(menu.getByText('团队 B', { exact: true })).toHaveCount(0);
   await expect(menu).toHaveCSS('background-color', 'rgb(9, 12, 42)');
   await menu.click({ position: { x: 12, y: 12 } });
   await expect(page.getByRole('dialog', { name: '个人信息' })).toBeVisible();
@@ -98,7 +96,7 @@ test('窄屏展开的团队菜单保持在视口内', async ({ page }, testInfo)
   await page.goto('/local-mask');
   await page.getByRole('button', { name: '成员', exact: true }).click();
   await page.getByRole('menuitem', { name: '查看你的团队' }).click();
-  const menu = page.getByRole('menu', { name: '团队列表（占位）' });
+  const menu = page.getByRole('menu', { name: '团队列表' });
   await expect(menu).toBeVisible();
   const bounds = await menu.boundingBox();
   expect(bounds!.x).toBeGreaterThanOrEqual(8);
@@ -131,7 +129,7 @@ test('完整字符按键不触发底层快捷键，外部点击关闭后保留�
   await page.getByRole('menuitem', { name: '查看你的团队' }).click();
   await page.keyboard.press('i');
   await expect(page.locator('html')).toHaveAttribute('data-team-menu-keys', '');
-  await page.getByRole('menu', { name: '团队列表（占位）' }).click({ position: { x: 12, y: 12 } });
+  await page.getByRole('menu', { name: '团队列表' }).click({ position: { x: 12, y: 12 } });
   const input = page.getByRole('textbox', { name: '外部预览输入' });
   await input.click();
   await expect(page.getByRole('dialog', { name: '个人信息' })).toBeHidden();

@@ -116,9 +116,10 @@ test('原成员在团队空间左边；自有团队勾选，卡片／团队／�
       writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
     }
   });
-  const member = page.getByRole('button', { name: '成员', exact: true });
-  const space = page.getByLabel('团队空间导航').getByText('团队空间', { exact: true });
-  expect((await member.boundingBox())!.x).toBeLessThan((await space.boundingBox())!.x);
+  const member = page.getByRole('button', { name: '我的', exact: true });
+  await expect(page.getByLabel('团队空间导航').getByText('团队空间', { exact: true })).toHaveCount(
+    0
+  );
   const card = page.getByRole('article').first();
   await expect(card.getByRole('link')).toHaveCount(0);
   await expect(card.getByRole('button')).toHaveCount(0);
@@ -132,7 +133,8 @@ test('原成员在团队空间左边；自有团队勾选，卡片／团队／�
   const owned = session.memberships.find(item => item.team_id === session.default_team_id)!;
   await expect(menu.getByRole('menuitemradio', { checked: true })).toContainText(owned.name);
   for (const item of await menu.getByRole('menuitemradio').all()) await expect(item).toBeDisabled();
-  await expect(menu.getByText('示例团队，仅展示，不可切换')).toBeVisible();
+  await expect(menu.getByText(/示例团队/)).toHaveCount(0);
+  await expect(menu.getByRole('menuitemradio')).toHaveCount(1);
   await menu.screenshot({ path: testInfo.outputPath('自有团队下拉.png') });
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');

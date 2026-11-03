@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { randomUUID } from 'crypto';
 import type { BusinessSession, BusinessSessionSnapshot, ImportSelection } from '@ohif/core';
 import Local, { selectionFromDrop } from './Local';
+import CreateTaskButton from '../Team/CreateTaskButton';
 import oldParser from './filesToStudies';
 import { LocalProjectService } from '../../business/LocalProjectService';
 import { TaskService } from '../../business/TaskService';
@@ -424,4 +425,133 @@ test('导航自身抛错时释放已绑定scope，不保留假活跃运行时', 
   expect(screen.getByRole('alert').textContent).toContain('导航故障');
   expect(mockServices.businessServices.projectRuntime.getCurrent()).toBeNull();
   expect(store.getStudy('1')).toBeUndefined();
+});
+
+test('看板按钮取消选择零登记，选文件前冻结团队，成功导航后保留项目', async () => {
+  snapshot.context!.memberships.push({
+    team_id: 'joined',
+    name: '其他团队',
+    owner_uid: 'other',
+    role: 'annotator',
+  });
+  request.mockImplementation(async (path, options) => ({
+    ...task(options.body.title),
+    team_id: path.includes('/joined/') ? 'joined' : 'team',
+  }));
+  const props = { services: mockServices.businessServices, teamId: 'joined' };
+  const view = render(h(CreateTaskButton, props));
+  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [] } });
+  expect(parse).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  view.rerender(h(CreateTaskButton, { ...props, teamId: 'team' }));
+  await act(async () =>
+    fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [file()] } })
+  );
+  expect(request).toHaveBeenCalledWith(
+    '/teams/joined/tasks',
+    expect.objectContaining({ method: 'POST' })
+  );
+  expect(snapshot.currentTeamId).toBe('team');
+  expect(mockNavigate).toHaveBeenCalled();
+  const project = mockServices.businessServices.localProjects.getCurrent();
+  view.unmount();
+  expect(mockServices.businessServices.localProjects.isCurrent(project)).toBe(true);
+});
+
+test('看板创建入口全失败不登记、可重新选择，登记失败重试同一幂等键', async () => {
+  render(h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' }));
+  async function choose(files) {
+    fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files } })
+    );
+  }
+  await choose([file('坏.dcm')]);
+  expect(request).not.toHaveBeenCalled();
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toContain('没有可用影像');
+  request.mockRejectedValueOnce(new Error('网络失败'));
+  await choose([file()]);
+  const key = request.mock.calls[0][1].idempotencyKey;
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试登记' })));
+  expect(request.mock.calls[1][1].idempotencyKey).toBe(key);
+  expect(mockNavigate).toHaveBeenCalledTimes(1);
+});
+
+test('看板按钮处理期间禁用重复创建，部分成功继续登记，缺目标不能打开', async () => {
+  let finish!: (value: ReturnType<typeof task>) => void;
+  request.mockReturnValueOnce(
+    new Promise(resolve => {
+      finish = resolve;
+    })
+  );
+  const props = { services: mockServices.businessServices, teamId: 'team' };
+  const view = render(h(CreateTaskButton, { ...props, teamId: undefined }));
+  expect((screen.getByRole('button', { name: '创建新任务' }) as HTMLButtonElement).disabled).toBe(
+    true
+  );
+  view.rerender(h(CreateTaskButton, props));
+  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  await act(async () =>
+    fireEvent.change(screen.getByLabelText('创建任务文件'), {
+      target: { files: [file('坏.dcm'), file()] },
+    })
+  );
+  expect((screen.getByRole('button', { name: '创建新任务' }) as HTMLButtonElement).disabled).toBe(
+    true
+  );
+  expect(screen.getByText('以下文件导入失败：坏.dcm')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toContain('登记');
+  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  expect(request).toHaveBeenCalledTimes(1);
+  await act(async () => finish(task()));
+  expect(mockNavigate).toHaveBeenCalledTimes(1);
+});
+
+test('看板解析中离开取消批次，晚结果不登记；未开始导入不销毁现有项目', async () => {
+  const projects = mockServices.businessServices.localProjects;
+  const existing = await projects.create({ files: [file()], kind: 'files' });
+  const untouched = render(
+    h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' })
+  );
+  untouched.unmount();
+  expect(projects.isCurrent(existing)).toBe(true);
+  let finish!: (value: unknown) => void;
+  const batch = await parse({ files: [file()], kind: 'files' });
+  parse.mockReturnValueOnce(
+    new Promise(resolve => {
+      finish = resolve;
+    })
+  );
+  const view = render(
+    h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' })
+  );
+  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  await act(async () =>
+    fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [file()] } })
+  );
+  expect(screen.getByRole('status').textContent).toContain('解析');
+  view.unmount();
+  await act(async () => finish(batch));
+  expect(request).not.toHaveBeenCalled();
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(projects.getCurrent()).toBeNull();
+});
+
+test('看板显式目标失效时不拥有原项目，离开入口也不销毁原项目', async () => {
+  const projects = mockServices.businessServices.localProjects;
+  const existing = await projects.create({ files: [file()], kind: 'files' });
+  parse.mockClear();
+  const view = render(
+    h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'unknown' })
+  );
+  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  await act(async () =>
+    fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [file()] } })
+  );
+  expect(parse).not.toHaveBeenCalled();
+  expect(request).not.toHaveBeenCalled();
+  view.unmount();
+  expect(projects.isCurrent(existing)).toBe(true);
 });

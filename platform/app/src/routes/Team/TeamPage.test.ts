@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import TeamPage from './TeamPage';
 import type { TeamTaskList } from '@ohif/core';
 const h = React.createElement;
-const ownedTeam = {
+const team = {
   team_id: '10000000-0000-4000-8000-000000000001',
   owner_uid: '30000000-0000-4000-8000-000000000001',
   role: 'owner' as const,
@@ -31,7 +31,7 @@ const data: TeamTaskList = {
 };
 const props = {
   view: 'team' as const,
-  ownedTeam,
+  team,
   username: '林医生',
   state: { status: 'ready' as const, data },
   onViewChange: jest.fn(),
@@ -41,8 +41,8 @@ afterEach(cleanup);
 test('显示品牌、团队身份、两个看板、卡片与同一响应计数，始终明确示例数据', () => {
   render(h(TeamPage, props));
   expect(screen.getByText('OHIF')).toBeTruthy();
-  expect(screen.getByText('团队空间')).toBeTruthy();
-  expect(screen.getByRole('heading', { name: ownedTeam.name })).toBeTruthy();
+  expect(screen.queryByText('团队空间')).toBeNull();
+  expect(screen.getByRole('heading', { name: team.name })).toBeTruthy();
   expect(screen.getByRole('button', { name: '团队任务' }).getAttribute('aria-current')).toBe(
     'page'
   );
@@ -87,17 +87,14 @@ test('成员插槽处于团队空间左侧，通知留在侧栏，不复制成�
   expect(within(nav).getByText('成员插槽')).toBeTruthy();
   expect(within(nav).queryByText('通知插槽')).toBeNull();
   expect(screen.getByLabelText('团队侧栏').contains(screen.getByText('通知插槽'))).toBe(true);
-  expect(
-    screen.getByText('成员插槽').compareDocumentPosition(screen.getByText('团队空间')) &
-      Node.DOCUMENT_POSITION_FOLLOWING
-  ).toBeTruthy();
+  expect(within(nav).queryByText('团队空间')).toBeNull();
 });
 
 test('recent 使用对应标题和集合，不附加团队页标题；刷新仅发读取意图', () => {
   const onRefresh = jest.fn();
   render(h(TeamPage, { ...props, view: 'recent', onRefresh }));
   expect(screen.getByRole('heading', { name: '最近任务' })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: ownedTeam.name })).toBeNull();
+  expect(screen.queryByRole('heading', { name: team.name })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '刷新列表' }));
   expect(onRefresh).toHaveBeenCalledTimes(1);
 });
@@ -120,4 +117,18 @@ test('合法空集合才显示零条成功', () => {
   );
   expect(screen.getByLabelText('任务数量').textContent).toBe('0');
   expect(screen.getByRole('status').textContent).toContain('暂无任务');
+});
+
+test.each(['team', 'recent'] as const)('标题栏在刷新后呈现创建入口，列表错误时仍保留：%s', view => {
+  const createTaskSlot = h('button', null, '创建新任务');
+  const { rerender } = render(
+    h(TeamPage, { ...props, view, onRefresh: jest.fn(), createTaskSlot })
+  );
+  const refresh = screen.getByRole('button', { name: '刷新列表' });
+  const create = screen.getByRole('button', { name: '创建新任务' });
+  expect(refresh.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  rerender(
+    h(TeamPage, { ...props, view, createTaskSlot, state: { status: 'error', message: '读取失败' } })
+  );
+  expect(screen.getByRole('button', { name: '创建新任务' })).toBeTruthy();
 });

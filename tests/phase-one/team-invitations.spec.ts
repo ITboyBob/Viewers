@@ -33,6 +33,7 @@ for (const decision of ['accepted', 'rejected'] as const) {
     page,
     browser,
     request,
+    baseURL,
   }) => {
     const recipientName = username();
     const recipientResponse = await request.post('/api/v1/users', {
@@ -45,7 +46,7 @@ for (const decision of ['accepted', 'rejected'] as const) {
     });
     expect(thirdResponse.status()).toBe(201);
     const third: IssuedBusinessSession = (await thirdResponse.json()).data;
-    const receiver = await browser.newContext();
+    const receiver = await browser.newContext({ baseURL });
     try {
       await page.goto('/account/register');
       await fill(page, username());
@@ -91,7 +92,7 @@ for (const decision of ['accepted', 'rejected'] as const) {
       ).toBe(false);
 
       const receiverPage = await receiver.newPage();
-      await receiverPage.goto('http://localhost:3336/account/login');
+      await receiverPage.goto('/account/login');
       await fill(receiverPage, recipientName);
       await receiverPage.getByRole('button', { name: '登录', exact: true }).click();
       await expect(receiverPage).toHaveURL(/\/team\/tasks$/);
@@ -152,7 +153,7 @@ test('真实失败留在邀请页，自己不发送；跳过不额外发送且�
   const before = validations;
   await page.getByRole('button', { name: '跳过' }).click();
   await expect(page).toHaveURL(/\/team\/tasks$/);
-  await expect(page.getByRole('button', { name: '成员', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '我的', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '通知', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '邀请', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '团队任务', exact: true })).toBeVisible();

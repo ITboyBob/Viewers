@@ -230,3 +230,31 @@
   font-size: 12px;
   line-height: 20px;
 }
+
+.team-page-create {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}
+.team-page-create-button {
+  padding: 6px 12px;
+  border: 1px solid var(--account-accent);
+  border-radius: 4px;
+  background: var(--account-card);
+  color: var(--account-accent);
+  font-weight: 500;
+}
+.team-page-create-button:hover:not(:disabled) {
+  background: #358cfd33;
+}
+.team-page-create-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.team-page-create [role='alert'],
+.team-page-import-failures {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}

@@ -9,10 +9,10 @@ const openMember = async () => {
   return screen.findByRole('dialog', { name: '个人信息' });
 };
 const teamTrigger = () => screen.getByRole('menuitem', { name: '查看你的团队' });
-const teamMenu = () => screen.getByRole('menu', { name: '团队列表（占位）' });
+const teamMenu = () => screen.getByRole('menu', { name: '团队列表' });
 afterEach(cleanup);
 
-test('点击团队入口在一级面板旁打开占位菜单，不请求接口或执行导航', async () => {
+test('点击团队入口在一级面板旁打开团队菜单，不请求接口或执行导航', async () => {
   const network = jest.fn(() => {
     throw new Error('禁止网络');
   });
@@ -31,13 +31,9 @@ test('点击团队入口在一级面板旁打开占位菜单，不请求接口�
     expect(teamTrigger().getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('dialog', { name: '个人信息' })).toBeTruthy();
     expect(teamMenu().getAttribute('data-side')).toBe('right');
-    expect(within(teamMenu()).getByText('示例团队，仅供界面预览')).toBeTruthy();
-    for (const name of ['团队 A', '团队 B']) {
-      const item = within(teamMenu()).getByRole('menuitem', { name });
-      expect(item.getAttribute('aria-disabled')).toBe('true');
-      expect((item as HTMLButtonElement).disabled).toBe(true);
-      fireEvent.click(item);
-    }
+    expect(within(teamMenu()).queryByText(/示例团队/)).toBeNull();
+    expect(within(teamMenu()).queryByText('团队 A')).toBeNull();
+    expect(within(teamMenu()).queryByText('团队 B')).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: '退出登录' }));
     expect(network).not.toHaveBeenCalled();
     expect(navigation).not.toHaveBeenCalled();
@@ -52,7 +48,7 @@ test('重复点击团队入口可以收起二级菜单，一级面板仍保持�
   fireEvent.click(teamTrigger());
   expect(teamMenu()).toBeTruthy();
   fireEvent.click(teamTrigger());
-  await waitFor(() => expect(screen.queryByRole('menu', { name: '团队列表（占位）' })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('menu', { name: '团队列表' })).toBeNull());
   expect(screen.getByRole('dialog', { name: '个人信息' })).toBeTruthy();
 });
 
@@ -76,11 +72,11 @@ test('键盘向右展开、向左收起；Escape 先关闭子菜单再关闭一�
   fireEvent.keyDown(teamTrigger(), { key: 'ArrowRight' });
   expect(teamMenu()).toBeTruthy();
   fireEvent.keyDown(teamMenu(), { key: 'ArrowLeft' });
-  await waitFor(() => expect(screen.queryByRole('menu', { name: '团队列表（占位）' })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('menu', { name: '团队列表' })).toBeNull());
   await waitFor(() => expect(document.activeElement).toBe(teamTrigger()));
   fireEvent.click(teamTrigger());
   fireEvent.keyDown(teamMenu(), { key: 'Escape' });
-  await waitFor(() => expect(screen.queryByRole('menu', { name: '团队列表（占位）' })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('menu', { name: '团队列表' })).toBeNull());
   expect(screen.getByRole('dialog', { name: '个人信息' })).toBeTruthy();
   await waitFor(() => expect(document.activeElement).toBe(teamTrigger()));
   fireEvent.keyDown(teamTrigger(), { key: 'Escape' });
@@ -100,7 +96,7 @@ test('点击外部关闭两级面板，重新打开不保留子菜单展开状�
   await new Promise(resolve => setTimeout(resolve, 0));
   fireEvent.pointerDown(document.body);
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(screen.queryByRole('menu', { name: '团队列表（占位）' })).toBeNull();
+  expect(screen.queryByRole('menu', { name: '团队列表' })).toBeNull();
   await openMember();
   expect(teamTrigger().getAttribute('aria-expanded')).toBe('false');
   expect(screen.getAllByRole('menuitem')).toHaveLength(2);
@@ -224,7 +220,8 @@ test('传入自有团队时首行使用真实团队名并勾选，其他示例�
       fireEvent.click(row);
     }
     expect(rows.slice(1).every(row => row.getAttribute('aria-checked') === 'false')).toBe(true);
-    expect(within(menu).getByText('示例团队，仅展示，不可切换')).toBeTruthy();
+    expect(rows).toHaveLength(1);
+    expect(within(menu).queryByText(/示例团队/)).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: '退出登录' }));
     expect(network).not.toHaveBeenCalled();
     expect(navigation).not.toHaveBeenCalled();
@@ -252,4 +249,12 @@ test('真实团队下拉仍支持左右键、Escape 分级关闭及焦点返回'
   await waitFor(() =>
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '成员' }))
   );
+});
+
+test('个人入口可配置为我的，默认标签仍为成员', () => {
+  const { rerender } = render(h(MemberOverlay, { user, label: '我的' }));
+  expect(screen.getByRole('button', { name: '我的' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '成员' })).toBeNull();
+  rerender(h(MemberOverlay, { user }));
+  expect(screen.getByRole('button', { name: '成员' })).toBeTruthy();
 });

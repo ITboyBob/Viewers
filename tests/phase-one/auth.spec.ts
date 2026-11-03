@@ -115,19 +115,20 @@ test('匿名直达mask和本地segmentation被拒绝，原生Local不触发业�
 test('独立浏览器上下文共享同实例账号团队但不共享标签页Token，异账号身份不能伪造', async ({
   browser,
   request,
+  baseURL,
 }) => {
-  const a = await browser.newContext(),
-    b = await browser.newContext();
+  const a = await browser.newContext({ baseURL }),
+    b = await browser.newContext({ baseURL });
   try {
     const name = username(),
       pageA = await a.newPage(),
       pageB = await b.newPage();
-    await pageA.goto('http://localhost:3336/account/register');
+    await pageA.goto('/account/register');
     await fill(pageA, name);
     await pageA.getByRole('button', { name: '下一步' }).click();
     await expect(pageA.getByRole('heading', { name: '是否还有其他人加入你？' })).toBeVisible();
     const tokenA = await storedToken(pageA);
-    await pageB.goto('http://localhost:3336/account/login');
+    await pageB.goto('/account/login');
     expect(
       await pageB.evaluate(storageKey => sessionStorage.getItem(storageKey) === null, key)
     ).toBe(true);

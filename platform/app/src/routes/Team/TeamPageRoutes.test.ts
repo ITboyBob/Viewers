@@ -100,7 +100,7 @@ test('团队页个人入口传真实默认自有团队，通知不接协作 mock
   const forUser = jest.spyOn(mockServices!.collaborationMock!, 'forUser');
   mount();
   await screen.findByText('后端演示任务');
-  fireEvent.click(screen.getByRole('button', { name: '成员', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '我的', exact: true }));
   fireEvent.click(screen.getByRole('menuitem', { name: '查看你的团队' }));
   expect(
     screen.getByRole('menuitemradio', { name: /团队页用户的团队/ }).getAttribute('aria-checked')
@@ -124,3 +124,15 @@ test('服务缺失明确失败，不以硬编码集合代替', () => {
   expect(screen.getByRole('alert').textContent).toContain('业务服务');
   expect(screen.queryByText('后端演示任务')).toBeNull();
 });
+
+test.each(['/team/tasks', '/team/recent'])(
+  '两页仅个人入口使用我的、创建入口可用：%s',
+  async path => {
+    mount(path);
+    expect(await screen.findByRole('button', { name: '我的', exact: true })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '成员', exact: true })).toBeNull();
+    expect((screen.getByRole('button', { name: '创建新任务' }) as HTMLButtonElement).disabled).toBe(
+      false
+    );
+  }
+);

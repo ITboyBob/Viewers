@@ -67,14 +67,19 @@ export class LocalProjectService implements LocalProjects {
     this.release = this.dependencies.release ?? parser.releaseImportBatch;
     return parser.default(input);
   };
-  async create(input: ImportSelection, microscopyLoaded = false): Promise<LocalProject | null> {
+  async create(
+    input: ImportSelection,
+    microscopyLoaded = false,
+    options?: { teamId?: string }
+  ): Promise<LocalProject | null> {
     const snapshot = this.session.getSnapshot();
-    const { context, currentTeamId } = snapshot;
+    const { context } = snapshot;
+    const teamId = options?.teamId ?? snapshot.currentTeamId;
     if (
       snapshot.status !== 'authenticated' ||
       !context ||
-      !currentTeamId ||
-      !context.memberships.some(member => member.team_id === currentTeamId)
+      !teamId ||
+      !context.memberships.some(member => member.team_id === teamId)
     ) {
       throw new Error('请先验证业务身份和团队');
     }
@@ -86,7 +91,14 @@ export class LocalProjectService implements LocalProjects {
       ...input,
       files: [...input.files],
     });
-    if (attempt !== this.attempt || generation !== this.generation) {
+    const latest = this.session.getSnapshot();
+    if (
+      attempt !== this.attempt ||
+      generation !== this.generation ||
+      latest.status !== 'authenticated' ||
+      latest.context?.user.uid !== importer_uid ||
+      !latest.context.memberships.some(member => member.team_id === teamId)
+    ) {
       this.release(batch);
       return null;
     }
@@ -103,7 +115,7 @@ export class LocalProjectService implements LocalProjects {
     const project: LocalProject = {
       ...batch,
       importer_uid,
-      team_id: currentTeamId,
+      team_id: teamId,
       title,
       mode_path:
         microscopyLoaded && batch.successes.some(item => item.dataset.Modality === 'SM')

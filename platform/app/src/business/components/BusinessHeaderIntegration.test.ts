@@ -11,7 +11,7 @@ const mockSystem = {
     services: {
       businessServices: {
         ui: { renderHeader: mockHeader },
-        localProjects: { dispose: jest.fn() },
+        localProjects: { dispose: jest.fn(), subscribe: () => () => {} },
         tasks: { cancel: jest.fn() },
         projectRuntime: { phaseOneMask: false },
       },

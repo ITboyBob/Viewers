@@ -8,8 +8,10 @@ import TeamListOverlay from './TeamListOverlay';
 export default function MemberOverlay({
   user,
   ownedTeam,
+  label = '成员',
 }: {
   user: BusinessUserSummary;
+  label?: string;
   ownedTeam?: BusinessTeamMembership;
 }) {
   const [open, setOpen] = useState(false);
@@ -19,7 +21,9 @@ export default function MemberOverlay({
   const closedByPointerOutsideRef = useRef(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     // 面板需隔离 pointerdown；捕获阶段判断外部点击，避免 Radix 的冒泡监听漏掉首次关闭。
     const closeOutside = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -40,7 +44,9 @@ export default function MemberOverlay({
     <Popover.Root
       open={open}
       onOpenChange={nextOpen => {
-        if (nextOpen) closedByPointerOutsideRef.current = false;
+        if (nextOpen) {
+          closedByPointerOutsideRef.current = false;
+        }
         setOpen(nextOpen);
       }}
     >
@@ -49,11 +55,11 @@ export default function MemberOverlay({
           ref={triggerRef}
           type="button"
           className="business-top-action"
-          aria-label="成员"
+          aria-label={label}
           onClick={event => event.stopPropagation()}
         >
           <PersonIcon aria-hidden="true" />
-          成员
+          {label}
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -70,7 +76,9 @@ export default function MemberOverlay({
           onKeyUp={event => event.stopPropagation()}
           onCloseAutoFocus={event => {
             // 外部点击应保留被点击控件的焦点；键盘关闭仍由 Radix 归还入口。
-            if (closedByPointerOutsideRef.current) event.preventDefault();
+            if (closedByPointerOutsideRef.current) {
+              event.preventDefault();
+            }
           }}
           onDrop={event => {
             event.preventDefault();
