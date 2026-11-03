@@ -12,12 +12,13 @@ const data = (title = '团队任务甲', teamId = team): TeamTaskList => ({
       task_id: '20000000-0000-4000-8000-000000000001',
       team_id: teamId,
       title,
-      subtitle: '示例文件',
-      preview_key: 'none',
+      assignee_uid: '30000000-0000-4000-8000-000000000001',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
     },
   ],
   total: 1,
-  mock: true,
+  mock: false,
 });
 function setup() {
   let value: BusinessSessionSnapshot = {

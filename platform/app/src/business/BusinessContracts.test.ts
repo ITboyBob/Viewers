@@ -39,20 +39,18 @@ test('共享容器仅在业务开启时装配，缺身份不能创建源或参�
 });
 
 test('团队页可选读取能力只在开关开启时装配，并复用原 API 客户端', async () => {
-  const transport = jest
-    .fn()
-    .mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: { items: [], total: 0, mock: true } }),
-    });
+  const transport = jest.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({ data: { items: [], total: 0, mock: false } }),
+  });
   const enabled = createBusinessServices({ enabled: true }, { fetch: transport, storage: null });
   expect(enabled.teamPage).toBeDefined();
   const request = jest.spyOn(enabled.api, 'request');
   await expect(enabled.teamPage!.listRecentTasks()).resolves.toEqual({
     items: [],
     total: 0,
-    mock: true,
+    mock: false,
   });
   expect(request).toHaveBeenCalledWith('/tasks/recent', { signal: undefined });
   expect(transport).toHaveBeenCalledWith(

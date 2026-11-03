@@ -1,4 +1,5 @@
 import React from 'react';
+import createProjectWorkspaceAdapter from './utils/ProjectWorkspaceAdapter';
 import * as cornerstone from '@cornerstonejs/core';
 import * as cornerstoneTools from '@cornerstonejs/tools';
 import {
@@ -93,6 +94,9 @@ const cornerstoneExtension: Types.Extensions.Extension = {
   id,
 
   onModeEnter: ({ servicesManager, commandsManager }: withAppTypes): void => {
+    servicesManager.services.businessServices?.projectRuntime?.setSnapshotAdapter(
+      createProjectWorkspaceAdapter(servicesManager.services)
+    );
     const { cornerstoneViewportService, toolbarService, segmentationService } =
       servicesManager.services;
 

@@ -15,19 +15,21 @@ const data: TeamTaskList = {
       task_id: '20000000-0000-4000-8000-000000000001',
       team_id: '10000000-0000-4000-8000-000000000001',
       title: '肝脏轮廓标注',
-      subtitle: '腹部 CT.dcm · 示例文件',
-      preview_key: 'abdominal-ct',
+      assignee_uid: '30000000-0000-4000-8000-000000000001',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
     },
     {
       task_id: '20000000-0000-4000-8000-000000000002',
       team_id: '10000000-0000-4000-8000-000000000001',
       title: '病灶复核标注',
-      subtitle: '示例任务',
-      preview_key: 'none',
+      assignee_uid: '30000000-0000-4000-8000-000000000001',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
     },
   ],
   total: 2,
-  mock: true,
+  mock: false,
 };
 const props = {
   view: 'team' as const,
@@ -38,7 +40,7 @@ const props = {
 };
 afterEach(cleanup);
 
-test('显示品牌、团队身份、两个看板、卡片与同一响应计数，始终明确示例数据', () => {
+test('显示品牌、团队身份、两个看板、卡片与同一响应计数，不包含示例数据', () => {
   render(h(TeamPage, props));
   expect(screen.getByText('OHIF')).toBeTruthy();
   expect(screen.queryByText('团队空间')).toBeNull();
@@ -48,14 +50,14 @@ test('显示品牌、团队身份、两个看板、卡片与同一响应计数�
   );
   expect(screen.getByRole('button', { name: '最近任务' })).toBeTruthy();
   expect(screen.getByText('肝脏轮廓标注')).toBeTruthy();
-  expect(screen.getByText('腹部 CT.dcm · 示例文件')).toBeTruthy();
+  expect(screen.getAllByText(/^创建于/)).toHaveLength(2);
   expect(screen.getByLabelText('任务数量').textContent).toBe('2');
-  expect(screen.getByRole('note').textContent).toContain('示例数据');
-  expect(screen.getByRole('img', { name: '示例影像预览' })).toBeTruthy();
-  expect(screen.getByText('暂无示例预览')).toBeTruthy();
+  expect(screen.queryByRole('note')).toBeNull();
+  expect(screen.queryByRole('img', { name: '示例影像预览' })).toBeNull();
+  expect(screen.queryByText(/示例数据/)).toBeNull();
 });
 
-test('切换只发意图，卡片不是链接或按钮，回收站不可操作', () => {
+test('切换只发意图，卡片没有业务回调时禁用，回收站不可操作', () => {
   const onViewChange = jest.fn();
   render(h(TeamPage, { ...props, onViewChange }));
   fireEvent.click(screen.getByRole('button', { name: '团队任务' }));
@@ -64,7 +66,7 @@ test('切换只发意图，卡片不是链接或按钮，回收站不可操作',
   expect(onViewChange).toHaveBeenCalledWith('recent');
   for (const card of screen.getAllByRole('article')) {
     expect(card.hasAttribute('tabindex')).toBe(false);
-    expect(within(card).queryByRole('button')).toBeNull();
+    expect((within(card).getByRole('button') as HTMLButtonElement).disabled).toBe(true);
     expect(within(card).queryByRole('link')).toBeNull();
     fireEvent.click(card);
   }
@@ -113,7 +115,10 @@ test('loading 与 error 不伪造零条成功，错误可重试', () => {
 
 test('合法空集合才显示零条成功', () => {
   render(
-    h(TeamPage, { ...props, state: { status: 'ready', data: { items: [], total: 0, mock: true } } })
+    h(TeamPage, {
+      ...props,
+      state: { status: 'ready', data: { items: [], total: 0, mock: false } },
+    })
   );
   expect(screen.getByLabelText('任务数量').textContent).toBe('0');
   expect(screen.getByRole('status').textContent).toContain('暂无任务');

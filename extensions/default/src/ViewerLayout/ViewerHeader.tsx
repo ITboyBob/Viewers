@@ -30,6 +30,22 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
           businessServices?.projectRuntime?.phaseOneMask === true)));
 
   const onClickReturnButton = () => {
+    if (maskViewer) {
+      try {
+        businessServices?.projectRuntime?.prepareSuspend?.();
+      } catch (error) {
+        servicesManager.services.uiNotificationService.show({
+          title: '任务未能保留',
+          message: error instanceof Error ? error.message : '请先导出后重试',
+          type: 'warning',
+        });
+        return;
+      }
+      const target =
+        location.state?.taskReturnTo === '/team/recent' ? '/team/recent' : '/team/tasks';
+      navigate(target, { replace: true });
+      return;
+    }
     const { pathname } = location;
     const dataSourceIdx = pathname.indexOf('/', 1);
 

@@ -24,6 +24,10 @@ export class LocalProjectService implements LocalProjects {
   private identity: string | null = null;
   private credentialGeneration = 0;
   private projectGeneration = new WeakMap<LocalProject, number>();
+  private retained = new Map<string, { project: LocalProject; batch: ImportBatch }>();
+  private batches = new WeakMap<LocalProject, ImportBatch>();
+  private selections = new WeakMap<LocalProject, ImportSelection>();
+  private workspaceStates = new WeakMap<LocalProject, unknown>();
   private listeners = new Set<() => void>();
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -56,10 +60,7 @@ export class LocalProjectService implements LocalProjects {
       this.credentialGeneration = credentialGeneration;
       this.identity = identity;
       this.generation++;
-      if (this.current && this.current.phase !== 'disposed') {
-        this.current.phase = 'invalid';
-        this.emit();
-      }
+      this.disposeAll();
     }
   }
   private parse = async (input: ImportSelection): Promise<ImportBatch> => {
@@ -130,9 +131,98 @@ export class LocalProjectService implements LocalProjects {
     }
     this.current = project;
     this.batch = batch;
+    this.batches.set(project, batch);
+    this.selections.set(project, { ...input, files: [...input.files] });
     this.projectGeneration.set(project, generation);
     return project;
   }
+  private eligible(project: LocalProject) {
+    const snapshot = this.session.getSnapshot();
+    return (
+      this.projectGeneration.get(project) === this.generation &&
+      project.phase === 'registered' &&
+      snapshot.status === 'authenticated' &&
+      snapshot.context?.user.uid === project.importer_uid &&
+      snapshot.context.memberships.some(member => member.team_id === project.team_id)
+    );
+  }
+  retain = (project: LocalProject) => {
+    const batch = this.batches.get(project);
+    if (!this.eligible(project) || !project.task_id || !batch) {
+      throw new Error('任务内存资格已失效');
+    }
+    this.retained.set(project.task_id, { project, batch });
+    this.emit();
+  };
+  getRetained = (taskId: string) => {
+    const project = this.retained.get(taskId)?.project;
+    return project && this.eligible(project) ? project : null;
+  };
+  activate = (taskId: string) => {
+    const entry = this.retained.get(taskId);
+    if (!entry || !this.eligible(entry.project)) {
+      throw new Error('当前页面未保留该任务影像，需重新导入');
+    }
+    if (this.current && this.current !== entry.project) {
+      throw new Error('请先离开当前任务');
+    }
+    this.current = entry.project;
+    this.batch = entry.batch;
+    this.emit();
+    return entry.project;
+  };
+  suspend = () => {
+    const status = this.session.getSnapshot().status;
+    const pendingIdentity = status === 'loading' || status === 'error';
+    const owned =
+      this.current &&
+      this.identity !== null &&
+      this.projectGeneration.get(this.current) === this.generation &&
+      this.current.phase === 'registered';
+    if (this.current && (this.eligible(this.current) || (pendingIdentity && owned))) {
+      const batch = this.batches.get(this.current);
+      if (!batch || !this.current.task_id) {
+        throw new Error('任务内存不存在');
+      }
+      this.retained.set(this.current.task_id, { project: this.current, batch });
+      this.current = null;
+      this.batch = null;
+      this.emit();
+    } else {
+      this.dispose();
+    }
+  };
+  getSelection = (project: LocalProject) =>
+    this.eligible(project) ? this.selections.get(project) : undefined;
+  setWorkspaceState = (project: LocalProject, state: unknown) => {
+    if (this.eligible(project)) {
+      this.workspaceStates.set(project, state);
+    }
+  };
+  getWorkspaceState = (project: LocalProject) =>
+    this.eligible(project) ? this.workspaceStates.get(project) : undefined;
+  disposeAll = () => {
+    const entries = [...this.retained.values()];
+    const batches = new Set(entries.map(entry => entry.batch));
+    if (this.batch) {
+      batches.add(this.batch);
+    }
+    for (const { project } of entries) {
+      project.phase = 'disposed';
+    }
+    if (this.current) {
+      this.current.phase = 'disposed';
+    }
+    this.retained.clear();
+    this.current = null;
+    this.batch = null;
+    this.workspaceStates = new WeakMap();
+    this.selections = new WeakMap();
+    this.attempt++;
+    this.failures = [];
+    this.emit();
+    batches.forEach(batch => this.release(batch));
+  };
   getCurrent = () => this.current;
   getFailures = () => this.failures;
   isCurrent = (project: LocalProject): boolean => {
@@ -169,14 +259,21 @@ export class LocalProjectService implements LocalProjects {
   dispose = () => {
     this.attempt++;
     this.failures = [];
-    if (this.current) {
-      this.current.phase = 'disposed';
+    const project = this.current,
+      batch = this.batch;
+    this.current = null;
+    this.batch = null;
+    if (project) {
+      if (project.task_id) {
+        this.retained.delete(project.task_id);
+      }
+      this.selections.delete(project);
+      this.workspaceStates.delete(project);
+      project.phase = 'disposed';
       this.emit();
     }
-    if (this.batch) {
-      this.release(this.batch);
+    if (batch) {
+      this.release(batch);
     }
-    this.batch = null;
-    this.current = null;
   };
 }

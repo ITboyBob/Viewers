@@ -372,3 +372,18 @@
     sans-serif;
   color: var(--account-muted, #7db3cf);
 }
+
+.business-member-panel .business-logout {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.business-member-panel .business-logout:not(:disabled) {
+  cursor: pointer;
+}
+.business-member-panel .business-logout:focus-visible {
+  outline: 2px solid var(--account-primary, #358cfd);
+}

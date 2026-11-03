@@ -4,7 +4,11 @@ import { PubSubService } from '../../../core/src/services/_shared/pubSubServiceI
 let runtime: ProjectRuntimeService, project: LocalProject, dispose: jest.Mock;
 const scope = () => ({ activate: jest.fn(), release: jest.fn() });
 beforeEach(() => {
-  project = { phase: 'registered', task_id: 'real-id' } as LocalProject;
+  project = {
+    phase: 'registered',
+    task_id: 'real-id',
+    mode_path: 'segmentation/dicomlocal',
+  } as LocalProject;
   dispose = jest.fn();
   runtime = new ProjectRuntimeService({
     isCurrent: () => true,
@@ -173,16 +177,130 @@ describe('3B真实事件桥接与generation生命周期', () => {
     runtime.getModeLifecycle().dispose();
     expect(services.measurementService.listeners.measurement).toHaveLength(0);
   });
-  test('身份失效同步中止桥接，但实际退出前保留scope和图像', async () => {
+  test('身份失效同步中止桥接并释放scope和图像', async () => {
+    const lifetime = runtime.getModeLifecycle();
     runtime.beginMode(services, 'dicomlocal');
     eligible = false;
     emit();
     broadcast();
     await flush();
     expect(touch).not.toHaveBeenCalled();
-    expect(prepared.release).not.toHaveBeenCalled();
+    expect(prepared.release).toHaveBeenCalledTimes(1);
     expect(services.measurementService.listeners.measurement).toHaveLength(0);
-    runtime.getModeLifecycle().dispose();
+    lifetime.dispose();
     expect(prepared.release).toHaveBeenCalledTimes(1);
   });
+});
+
+test('退出先保存独立快照再执行原生清理，暂停保留项目而非销毁', () => {
+  const events: string[] = [];
+  const projects = {
+    isCurrent: () => true,
+    getCurrent: () => project,
+    suspend: () => events.push('suspend'),
+    dispose: jest.fn(),
+    setWorkspaceState: (_p, value) => events.push(value),
+  } as unknown as LocalProjects;
+  runtime = new ProjectRuntimeService(projects);
+  runtime.setSnapshotAdapter({ capture: () => 'snapshot', restore: jest.fn() });
+  runtime.bind(project, scope());
+  const lifecycle = runtime.getModeLifecycle();
+  lifecycle.setNativeExit(() => events.push('native-exit'));
+  lifecycle.dispose();
+  expect(events).toEqual(['snapshot', 'native-exit', 'suspend']);
+  expect(projects.dispose).not.toHaveBeenCalled();
+});
+
+test('恢复未完成时不启动事件桥接；离开后晚完成不能重新挂载', async () => {
+  let complete!: () => void;
+  let signal!: AbortSignal;
+  const projects = {
+    isCurrent: () => true,
+    getCurrent: () => project,
+    dispose: jest.fn(),
+    getWorkspaceState: () => ({}),
+  } as unknown as LocalProjects;
+  runtime = new ProjectRuntimeService(projects);
+  runtime.setSnapshotAdapter({
+    capture: jest.fn(),
+    restore: (_p, _s, abort) => {
+      signal = abort;
+      return new Promise(resolve => {
+        complete = resolve;
+      });
+    },
+  });
+  runtime.bind(project, scope());
+  const begin = jest.spyOn(runtime, 'beginMode');
+  const restoring = runtime.restoreMode({}, 'dicomlocal');
+  expect(begin).not.toHaveBeenCalled();
+  runtime.getHandle().releaseScope();
+  expect(signal.aborted).toBe(true);
+  complete();
+  await restoring;
+  expect(begin).not.toHaveBeenCalled();
+});
+
+test('有待恢复快照时从bind起保护旧数据，初始化失败不得用空状态覆盖', () => {
+  const saved = { old: 'nonempty-mask' },
+    write = jest.fn(),
+    capture = jest.fn();
+  const projects = {
+    isCurrent: () => true,
+    getCurrent: () => project,
+    getWorkspaceState: () => saved,
+    setWorkspaceState: write,
+    suspend: jest.fn(),
+  } as unknown as LocalProjects;
+  runtime = new ProjectRuntimeService(projects);
+  runtime.setSnapshotAdapter({ capture, restore: jest.fn() });
+  runtime.bind(project, scope());
+  runtime.getModeLifecycle().setNativeExit(() => {});
+  runtime.getModeLifecycle().dispose();
+  expect(capture).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
+});
+
+test('返回预捕获失败不会覆盖原快照或释放工作台；自动退出失败留下显式错误而非空成功', async () => {
+  const saved = { pixels: [1, 2] };
+  const set = jest.fn();
+  const projects = {
+    isCurrent: () => true,
+    getCurrent: () => project,
+    setWorkspaceState: set,
+    getWorkspaceState: () => undefined,
+    suspend: jest.fn(),
+  } as unknown as LocalProjects;
+  runtime = new ProjectRuntimeService(projects);
+  runtime.setSnapshotAdapter({
+    capture: () => {
+      throw new Error('不能保存');
+    },
+    restore: jest.fn(),
+  });
+  runtime.bind(project, scope());
+  expect(() => runtime.prepareSuspend()).toThrow('不能保存');
+  expect(set).not.toHaveBeenCalled();
+  expect(runtime.getCurrent()).toBe(project);
+  runtime.getModeLifecycle().dispose();
+  expect(set).toHaveBeenCalledWith(project, expect.objectContaining({ captureError: '不能保存' }));
+  expect(projects.suspend).toHaveBeenCalledTimes(1);
+});
+
+test('显微镜任务不使用Cornerstone测量快照，暂停仍保留其文件', () => {
+  project.mode_path = 'microscopy';
+  const projects = {
+    isCurrent: () => true,
+    getCurrent: () => project,
+    suspend: jest.fn(),
+    setWorkspaceState: jest.fn(),
+  } as unknown as LocalProjects;
+  runtime = new ProjectRuntimeService(projects);
+  const capture = jest.fn();
+  runtime.setSnapshotAdapter({ capture, restore: jest.fn() });
+  runtime.bind(project, scope());
+  runtime.prepareSuspend();
+  runtime.getModeLifecycle().dispose();
+  expect(capture).not.toHaveBeenCalled();
+  expect(projects.suspend).toHaveBeenCalledTimes(1);
 });

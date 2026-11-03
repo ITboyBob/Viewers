@@ -16,6 +16,7 @@ spring:
         - classpath:db/V001__identity.sql
         - optional:classpath:db/V002__invitations.sql
         - optional:classpath:db/V003__tasks.sql
+        - optional:classpath:db/V004__task_visits.sql
   h2:
     console:
       enabled: false

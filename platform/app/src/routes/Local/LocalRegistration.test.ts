@@ -15,7 +15,10 @@ Object.defineProperty(globalThis.crypto, 'randomUUID', { value: randomUUID, conf
 let mockServices;
 let mockConfig = { phaseOneBusiness: { enabled: true } };
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({ useNavigate: () => mockNavigate }));
+jest.mock('react-router-dom', () => ({
+  useNavigate: () => mockNavigate,
+  useLocation: () => ({ pathname: '/team/tasks' }),
+}));
 jest.mock('@state', () => ({ useAppConfig: () => [mockConfig] }), { virtual: true });
 jest.mock(
   '@ohif/core',
@@ -138,6 +141,7 @@ beforeEach(() => {
       projectRuntime: new ProjectRuntimeService(projects),
     },
   };
+  mockServices.businessServices.tasks.visit = jest.fn().mockResolvedValue(undefined);
 });
 afterEach(() => {
   cleanup();
@@ -212,7 +216,7 @@ test('pending不激活scope、不导航；只有校验后的真实ID才能先激
   expect(store.getStudyInstanceUIDs()).toEqual(['1']);
   expect(mockNavigate).toHaveBeenCalledWith(
     '/segmentation/dicomlocal?StudyInstanceUIDs=1&datasources=dicomlocal',
-    { state: { phaseOneMask: true } }
+    { state: { phaseOneMask: true, taskReturnTo: '/team/tasks' } }
   );
   expect(mockServices.businessServices.projectRuntime.getCurrent().task_id).toBe(task().task_id);
 });
@@ -293,7 +297,7 @@ test('文件夹名来自根目录，保留SM目标选择且所有新路径共用
   expect(request.mock.calls[0][1].body).toEqual({ title: '根目录' });
   expect(mockNavigate).toHaveBeenCalledWith(
     '/microscopy?StudyInstanceUIDs=1&datasources=dicomlocal',
-    { state: { phaseOneMask: true } }
+    { state: { phaseOneMask: true, taskReturnTo: '/team/tasks' } }
   );
 });
 test('离开或换账号后晚响应不激活旧scope、不导航', async () => {
@@ -408,6 +412,7 @@ test('激活后运行时绑定失败会撤销scope，重试不重新解码或重
   mount();
   await select();
   expect(store.getStudy('1')).toBeUndefined();
+  expect(mockServices.businessServices.localProjects.getCurrent()).toBeNull();
   expect(mockNavigate).not.toHaveBeenCalled();
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '重试登记' }));
@@ -554,4 +559,21 @@ test('看板显式目标失效时不拥有原项目，离开入口也不销毁�
   expect(request).not.toHaveBeenCalled();
   view.unmount();
   expect(projects.isCurrent(existing)).toBe(true);
+});
+
+test('登记后的访问失败留页，同一任务重试访问不重复登记，离开时中止访问请求', async () => {
+  const visit = mockServices.businessServices.tasks.visit as jest.Mock;
+  visit.mockRejectedValueOnce(new Error('访问记录失败'));
+  mount();
+  await select();
+  expect(screen.getByRole('alert').textContent).toContain('访问记录失败');
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(request).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '重试登记' }));
+  });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(visit).toHaveBeenCalledTimes(2);
+  expect(visit.mock.calls[0][0]).toBe(visit.mock.calls[1][0]);
+  expect(mockNavigate).toHaveBeenCalledTimes(1);
 });

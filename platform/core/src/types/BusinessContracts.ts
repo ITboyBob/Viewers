@@ -42,12 +42,14 @@ export interface BusinessSession {
   login(input: BusinessCredentials): Promise<BusinessSessionSnapshot>;
   validateCurrent(): Promise<BusinessSessionSnapshot>;
   invalidate(): void;
+  logout(): Promise<void>;
   getSnapshot(): BusinessSessionSnapshot;
   subscribe(listener: () => void): () => void;
 }
 /** 路由标记不是身份凭证；C 在现有运行时中扩充 project 上下文，不复制该标记。 */
-export type PhaseOneRouteState = { phaseOneMask?: boolean };
-export type BusinessRuntime = Readonly<Required<PhaseOneRouteState>>;
+export type TaskReturnPath = '/team/tasks' | '/team/recent';
+export type PhaseOneRouteState = { phaseOneMask?: boolean; taskReturnTo?: TaskReturnPath };
+export type BusinessRuntime = Readonly<{ phaseOneMask: boolean }>;
 export type InvitationDecision = 'pending' | 'accepted' | 'rejected';
 export type InvitationView = {
   invitation_id: string;
@@ -95,17 +97,14 @@ export interface CollaborationMockApi {
   getError(): string | null;
   clockNow(): number;
 }
-/** 团队页第一阶段演示读取投影，不扩充真实 BusinessTask 或访问写入。 */
-export type TeamTaskCard = {
-  task_id: string;
-  team_id: string;
-  title: string;
-  subtitle: string;
-  preview_key: 'abdominal-ct' | 'none';
-};
+/** 真实任务投影；影像和标注不进入列表接口。 */
+export type TeamTaskCard = Pick<
+  BusinessTask,
+  'task_id' | 'team_id' | 'title' | 'assignee_uid' | 'created_at' | 'updated_at'
+>;
 export type RecentTaskCard = TeamTaskCard & { last_entered_at: string };
-export type TeamTaskList = { items: TeamTaskCard[]; total: number; mock: true };
-export type RecentTaskList = { items: RecentTaskCard[]; total: number; mock: true };
+export type TeamTaskList = { items: TeamTaskCard[]; total: number; mock: false };
+export type RecentTaskList = { items: RecentTaskCard[]; total: number; mock: false };
 export type TaskMemberList = {
   task_id: string;
   owner_uid: string;
@@ -184,6 +183,14 @@ export interface LocalProjects {
   updateTimestamp(project: LocalProject, value: BusinessTaskTimestamp): boolean;
   subscribe(listener: () => void): () => void;
   dispose(): void;
+  retain(project: LocalProject): void;
+  getRetained(taskId: string): LocalProject | null;
+  activate(taskId: string): LocalProject;
+  suspend(): void;
+  disposeAll(): void;
+  getSelection(project: LocalProject): ImportSelection | undefined;
+  setWorkspaceState(project: LocalProject, state: unknown): void;
+  getWorkspaceState(project: LocalProject): unknown;
 }
 
 export type BusinessTask = {
@@ -196,6 +203,7 @@ export type BusinessTask = {
   updated_at: string;
 };
 export interface TaskApi {
+  visit(taskId: string, signal?: AbortSignal): Promise<void>;
   register(project: LocalProject): Promise<BusinessTask>;
   touch(project: LocalProject, signal: AbortSignal): Promise<BusinessTaskTimestamp>;
   cancel(project: LocalProject): void;
@@ -204,7 +212,16 @@ export type BusinessTaskTimestamp = { task_id: string; updated_at: string };
 export type LocalImportScope = { activate(): void; release(): void; isActive?(): boolean };
 export type ProjectLifecycleHandle = { deactivate(): void; releaseScope(): void };
 export type ProjectModeLifecycle = { setNativeExit(exit: () => void): () => void; dispose(): void };
+export interface ProjectWorkspaceAdapter {
+  capture(project: LocalProject): unknown;
+  restore(project: LocalProject, state: unknown, signal: AbortSignal): Promise<void>;
+}
 export interface ProjectRuntime extends BusinessRuntime {
+  readonly restoringWorkspace: boolean;
+  prepareSuspend(): void;
+  setSnapshotAdapter(adapter: ProjectWorkspaceAdapter): void;
+  restoreMode(services: ProjectAnnotationServices, dataSourceName?: string): Promise<void>;
+
   bind(project: LocalProject, scope: LocalImportScope): ProjectLifecycleHandle;
   getCurrent(): LocalProject | null;
   getHandle(): ProjectLifecycleHandle | null;

@@ -353,21 +353,17 @@ test('真实测量／分割与展示动作逐事件写时间，退出无销毁�
     ).toBe(true);
     return events;
   };
-  // 初始化属于新project的有效生命周期，先核验实际广播及写入，再建立手动动作基线。
-  const initialized = await expectNextUpdates(0);
-  expect(initialized).toContainEqual({
-    event: await page.evaluate(
-      () =>
-        (window as unknown as ProjectTestWindow).services.measurementService.EVENTS
-          .MEASUREMENTS_CLEARED
-    ),
-    task_id: next.task_id,
-  });
+  // 原生初始化不产生标注更新时间写入；就绪后重新建立动作审计基线。
+  await frames(page);
+  expect(written).toHaveLength(beforeExit);
+  expect(touchRequests).toHaveLength(requestsBeforeExit);
+  await page.evaluate(() => (window as unknown as ProjectTestWindow).eventAudit.stop());
+  await startEventAudit(page);
   // 再导入用现有分割／展示能力验桥接；不激活Length或复位原生交互状态。
   await page.locator('[data-cy="addSegmentation"]').click();
   await expect(page.getByRole('button', { name: '应用阈值到整组切片', exact: true })).toBeEnabled();
-  const created = await expectNextUpdates(initialized.length);
-  expect(created.slice(initialized.length)).toContainEqual({
+  const created = await expectNextUpdates(0);
+  expect(created.slice(0)).toContainEqual({
     event: await page.evaluate(
       () =>
         (window as unknown as ProjectTestWindow).services.segmentationService.EVENTS
@@ -474,7 +470,7 @@ test('真实touch已提交后延迟交付，退出中止且晚响应不更新旧
           current: w.services.businessServices.projectRuntime.getCurrent(),
         };
       })
-    ).toEqual({ phase: 'disposed', time: oldTime, current: null });
+    ).toEqual({ phase: 'registered', time: oldTime, current: null });
   } finally {
     deliver();
   }
@@ -502,13 +498,10 @@ test('真实撤销业务会话后touch401清身份和桥接，标注页保留且
   expect(page.url()).toBe(before);
   await expect(page.locator('canvas').first()).toBeVisible();
   expect(
-    await page.evaluate(
-      () =>
-        (
-          window as unknown as ProjectTestWindow
-        ).services.businessServices.projectRuntime.getCurrent().phase
+    await page.evaluate(() =>
+      (window as unknown as ProjectTestWindow).services.businessServices.projectRuntime.getCurrent()
     )
-  ).toBe('invalid');
+  ).toBeNull();
 });
 
 for (const status of [403, 404]) {

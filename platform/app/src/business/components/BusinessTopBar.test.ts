@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BusinessTopBar from './BusinessTopBar';
 import { createBusinessServices } from '../createBusinessServices';
@@ -7,6 +7,8 @@ import type { BusinessServices } from '@ohif/core';
 jest.mock('@ohif/core', () => ({ useSystem: jest.fn() }), { virtual: true });
 
 const h = React.createElement;
+const render = element =>
+  rtlRender(element.type === MemoryRouter ? element : h(MemoryRouter, null, element));
 const snapshot = {
   status: 'authenticated' as const,
   currentTeamId: 't',

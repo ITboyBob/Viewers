@@ -384,7 +384,8 @@ export default class HangingProtocolService extends PubSubService {
    * specifically, but will show another study instead.
    */
   public setActiveStudyUID(activeStudyUID: string) {
-    if (!activeStudyUID || activeStudyUID === this.activeStudy?.StudyInstanceUID) {
+    // 本地任务可有相同UID但不同study对象；每次从当前集合重新绑定。
+    if (!activeStudyUID) {
       return;
     }
     this.activeStudy = this.studies.find(it => it.StudyInstanceUID === activeStudyUID);

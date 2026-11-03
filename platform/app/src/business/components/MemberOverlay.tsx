@@ -4,15 +4,17 @@ import { PersonIcon, ExitIcon } from '@radix-ui/react-icons';
 import type { BusinessTeamMembership, BusinessUserSummary } from '@ohif/core';
 import TeamListOverlay from './TeamListOverlay';
 
-/** 个人信息面板；可展示会话自有团队，但不查询、切换团队或执行注销。 */
+/** 个人信息面板；可展示会话自有团队，但不查询或切换团队，注销由统一业务回调执行。 */
 export default function MemberOverlay({
   user,
   ownedTeam,
   label = '成员',
+  onLogout,
 }: {
   user: BusinessUserSummary;
   label?: string;
   ownedTeam?: BusinessTeamMembership;
+  onLogout?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -112,13 +114,20 @@ export default function MemberOverlay({
               contentRef={teamRef}
               suppressCloseFocusRef={closedByPointerOutsideRef}
             />
-            <div
+            <button
+              type="button"
               role="menuitem"
-              aria-disabled="true"
+              className="business-logout"
+              disabled={!onLogout}
+              aria-disabled={!onLogout}
+              onClick={() => {
+                setOpen(false);
+                onLogout?.();
+              }}
             >
               <ExitIcon aria-hidden="true" />
               退出登录
-            </div>
+            </button>
           </div>
         </Popover.Content>
       </Popover.Portal>

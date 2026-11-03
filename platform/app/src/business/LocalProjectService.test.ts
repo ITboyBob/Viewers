@@ -152,7 +152,7 @@ test('同账号退出后再登录也不能恢复旧批次', async () => {
   snapshot = context();
   emit();
   expect(service.isCurrent(project)).toBe(false);
-  expect(project.phase).toBe('invalid');
+  expect(project.phase).toBe('disposed');
 });
 test('废弃解析及重复进入不会让旧完成覆盖新批次', async () => {
   let finish;
@@ -194,7 +194,7 @@ test('同账号和相同到期时间下换凭证仍废弃旧generation，常规c
   credentialGeneration++;
   emit();
   expect(service.isCurrent(project)).toBe(false);
-  expect(project.phase).toBe('invalid');
+  expect(project.phase).toBe('disposed');
 });
 
 test('真实集中服务工厂在同账号同到期时间重新登录时更新凭证generation', async () => {
@@ -215,7 +215,7 @@ test('真实集中服务工厂在同账号同到期时间重新登录时更新�
   token = 'synthetic-session-b';
   await services.session.login({ username: 'u', password: 'synthetic' });
   expect(services.localProjects!.isCurrent(project)).toBe(false);
-  expect(project.phase).toBe('invalid');
+  expect(project.phase).toBe('disposed');
 });
 jest.mock('@ohif/core', () => ({ useSystem: jest.fn() }), { virtual: true });
 
@@ -258,3 +258,55 @@ test('显式目标在解析期间被冻结；成员资格撤销后释放批次',
   expect(await revoked).toBeNull();
   expect(release).toHaveBeenCalled();
 });
+
+test('已登记任务暂停后保留资源，创建同UID的B再激活A不重复解析或释放', async () => {
+  parse.mockResolvedValueOnce(batch()).mockResolvedValueOnce(batch());
+  const a = await service.create(selection);
+  Object.assign(a, { phase: 'registered', task_id: 'a' });
+  service.retain(a);
+  service.suspend();
+  expect(service.getCurrent()).toBeNull();
+  expect(service.getRetained('a')).toBe(a);
+  expect(release).not.toHaveBeenCalled();
+  const b = await service.create(selection);
+  Object.assign(b, { phase: 'registered', task_id: 'b' });
+  service.retain(b);
+  service.suspend();
+  expect(service.activate('a')).toBe(a);
+  expect(service.isCurrent(a)).toBe(true);
+  expect(parse).toHaveBeenCalledTimes(2);
+  service.disposeAll();
+  expect(service.getRetained('a')).toBeNull();
+  expect(service.getRetained('b')).toBeNull();
+  expect(release).toHaveBeenCalledTimes(2);
+});
+
+test('身份失效清理全部已保留任务；迟到响应不能重新保留旧项目', async () => {
+  const a = await service.create(selection);
+  Object.assign(a, { phase: 'registered', task_id: 'a' });
+  service.retain(a);
+  service.suspend();
+  snapshot = { status: 'invalid', context: null, currentTeamId: null, error: null };
+  emit();
+  expect(service.getRetained('a')).toBeNull();
+  expect(release).toHaveBeenCalledTimes(1);
+  expect(() => service.retain(a)).toThrow();
+});
+
+test.each(['loading', 'error'] as const)(
+  '复开身份验证%s期间离开不能销毁已保留项目',
+  async status => {
+    const a = await service.create(selection);
+    Object.assign(a, { phase: 'registered', task_id: 'a' });
+    service.retain(a);
+    service.setWorkspaceState(a, { saved: true });
+    snapshot = { status, context: null, currentTeamId: null, error: null };
+    emit();
+    service.suspend();
+    expect(release).not.toHaveBeenCalled();
+    snapshot = context();
+    emit();
+    expect(service.getRetained('a')).toBe(a);
+    expect(service.getWorkspaceState(a)).toEqual({ saved: true });
+  }
+);

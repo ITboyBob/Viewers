@@ -241,7 +241,12 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
         .toEqual({ task_id: task.task_id, title: task.title, time: written.at(-1).updated_at });
       return events.length;
     };
-    let count = await auditUpdates(0);
+    // 模式初始化和恢复不再是用户编辑；只审计就绪后的真实动作。
+    await frames(page);
+    await page.evaluate(() => {
+      (window as unknown as GFWindow).gfAudit.events = [];
+    });
+    let count = 0;
     await page.locator('[data-cy="addSegmentation"]').click();
     await expect(
       page.getByRole('button', { name: '应用阈值到整组切片', exact: true })

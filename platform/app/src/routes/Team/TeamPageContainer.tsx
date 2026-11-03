@@ -10,6 +10,10 @@ type Props = {
   createTaskSlot?: React.ReactNode;
   memberSlot?: React.ReactNode;
   notificationSlot?: React.ReactNode;
+  taskStatusSlot?: React.ReactNode;
+  onOpenTask?(taskId: string): void;
+  canOpenTask?(taskId: string): boolean;
+  openingTaskId?: string | null;
 };
 
 function ReadTeamPage({

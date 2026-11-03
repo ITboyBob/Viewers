@@ -39,15 +39,13 @@ async function expectCards(page: Page, data: TeamTaskList | RecentTaskList) {
   const cards = page.getByRole('article');
   await expect(cards).toHaveCount(data.total);
   await expect(cards.locator('h3')).toHaveText(data.items.map(item => item.title));
-  await expect(cards.locator('.team-page-card-info p')).toHaveText(
-    data.items.map(item => item.subtitle)
-  );
 }
 
-test('真实注册先邀请后跳过；两个 HTTP mock 看板切换、刷新及再次登录保持稳定', async ({ page }) => {
+test('真实注册先邀请后跳过；两个真实空看板切换、刷新及再次登录保持稳定', async ({ page }) => {
   const { username, session } = await register(page);
   const team = await skip(page, session.default_team_id);
-  expect(team.mock).toBe(true);
+  expect(team.mock).toBe(false);
+  expect(team.total).toBe(0);
   expect(team.total).toBe(team.items.length);
   expect(team.items.every(item => item.team_id === session.default_team_id)).toBe(true);
   await expectCards(page, team);
@@ -55,12 +53,12 @@ test('真实注册先邀请后跳过；两个 HTTP mock 看板切换、刷新及
   await page.getByRole('button', { name: '最近任务', exact: true }).click();
   await expect(page).toHaveURL(/\/team\/recent$/);
   const recent: RecentTaskList = (await (await recentRead).json()).data;
-  expect(recent.mock).toBe(true);
+  expect(recent.mock).toBe(false);
+  expect(recent.total).toBe(0);
   expect(recent.total).toBe(recent.items.length);
-  expect(recent.items.some(item => item.team_id !== session.default_team_id)).toBe(true);
   await expectCards(page, recent);
-  const external = recent.items.find(item => item.team_id !== session.default_team_id)!;
-  await expect(page.getByRole('heading', { name: external.title, exact: true })).toBeVisible();
+  await expect(page.getByText('暂无任务', { exact: true })).toBeVisible();
+  await expect(page.getByText(/示例数据|腹部 CT 示例|标注任务示例/)).toHaveCount(0);
   const refreshed = page.waitForResponse(response => isRead(response, '/api/v1/tasks/recent'));
   await page.reload();
   expect((await (await refreshed).json()).data).toEqual(recent);
@@ -82,7 +80,7 @@ test('真实注册先邀请后跳过；两个 HTTP mock 看板切换、刷新及
   await expectCards(page, team);
 });
 
-test('原成员在团队空间左边；自有团队勾选，卡片／团队／注销／回收站不触发业务写入', async ({
+test('原成员在团队空间左边；自有团队勾选，真实空列表和团队菜单不触发业务写入，注销可操作', async ({
   page,
 }, testInfo) => {
   const { session } = await register(page);
@@ -120,14 +118,10 @@ test('原成员在团队空间左边；自有团队勾选，卡片／团队／�
   await expect(page.getByLabel('团队空间导航').getByText('团队空间', { exact: true })).toHaveCount(
     0
   );
-  const card = page.getByRole('article').first();
-  await expect(card.getByRole('link')).toHaveCount(0);
-  await expect(card.getByRole('button')).toHaveCount(0);
-  await card.click();
-  await expect(page).toHaveURL(/\/team\/tasks$/);
+  await expect(page.getByRole('article')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '回收站（暂未开放）' })).toBeDisabled();
   await member.click();
-  await expect(page.getByRole('menuitem', { name: '退出登录', exact: true })).toBeDisabled();
+  await expect(page.getByRole('menuitem', { name: '退出登录', exact: true })).toBeEnabled();
   await page.getByRole('menuitem', { name: '查看你的团队', exact: true }).click();
   const menu = page.getByRole('menu', { name: '团队列表', exact: true });
   const owned = session.memberships.find(item => item.team_id === session.default_team_id)!;

@@ -140,7 +140,7 @@ class TaskTouchIT {
         assertThat(row().get("UPDATED_AT")).isEqualTo(utc(NOW.plusMillis(count)));
     }
     @Test void noTaskReadOrGeneralWriteMappingsAreIntroduced() throws Exception {
-        for (String route : List.of("/api/v1/teams/" + team + "/tasks", "/api/v1/teams/" + team + "/tasks/" + id, path(team, id))) {
+        for (String route : List.of("/api/v1/teams/" + team + "/tasks/" + id, path(team, id))) {
             int status = http.perform(get(route).header("Authorization", "Bearer " + token)).andReturn().getResponse().getStatus();
             assertThat(status).isIn(404, 405);
         }

@@ -1,4 +1,5 @@
 import * as cornerstoneTools from '@cornerstonejs/tools';
+import { debounce } from 'lodash';
 import { updateSegmentationStats } from './updateSegmentationStats';
 
 /**
@@ -8,56 +9,62 @@ export function setupSegmentationDataModifiedHandler({
   segmentationService,
   customizationService,
   commandsManager,
+  isRestoring = () => false,
 }) {
   // A flag to indicate if the event is unsubscribed to. This is important because
   // the debounced callback does an await and in that period of time the event may have
   // been unsubscribed.
   let isUnsubscribed = false;
-  const { unsubscribe: debouncedUnsubscribe } = segmentationService.subscribeDebounced(
-    segmentationService.EVENTS.SEGMENTATION_DATA_MODIFIED,
-    async ({ segmentationId }) => {
-      const segmentation = segmentationService.getSegmentation(segmentationId);
+  const updateStats = debounce(async ({ segmentationId }) => {
+    const segmentation = segmentationService.getSegmentation(segmentationId);
 
-      if (!segmentation) {
-        return;
-      }
+    if (!segmentation) {
+      return;
+    }
 
-      const readableText = customizationService.getCustomization('panelSegmentation.readableText');
+    const readableText = customizationService.getCustomization('panelSegmentation.readableText');
 
-      // Check for segments with bidirectional measurements and update them
-      const segmentIndices = Object.keys(segmentation.segments)
-        .map(index => parseInt(index))
-        .filter(index => index > 0);
+    // Check for segments with bidirectional measurements and update them
+    const segmentIndices = Object.keys(segmentation.segments)
+      .map(index => parseInt(index))
+      .filter(index => index > 0);
 
-      for (const segmentIndex of segmentIndices) {
-        const segment = segmentation.segments[segmentIndex];
-        if (segment?.cachedStats?.namedStats?.bidirectional) {
-          // Run the command to update the bidirectional measurement
-          commandsManager.runCommand('runSegmentBidirectional', {
-            segmentationId,
-            segmentIndex,
-          });
-        }
-      }
-
-      const updatedSegmentation = await updateSegmentationStats({
-        segmentation,
-        segmentationId,
-        readableText,
-      });
-
-      if (!isUnsubscribed && updatedSegmentation) {
-        segmentationService.addOrUpdateSegmentation({
+    for (const segmentIndex of segmentIndices) {
+      const segment = segmentation.segments[segmentIndex];
+      if (segment?.cachedStats?.namedStats?.bidirectional) {
+        // Run the command to update the bidirectional measurement
+        commandsManager.runCommand('runSegmentBidirectional', {
           segmentationId,
-          segments: updatedSegmentation.segments,
+          segmentIndex,
         });
       }
-    },
-    1000
+    }
+
+    const updatedSegmentation = await updateSegmentationStats({
+      segmentation,
+      segmentationId,
+      readableText,
+    });
+
+    if (!isUnsubscribed && updatedSegmentation) {
+      segmentationService.addOrUpdateSegmentation({
+        segmentationId,
+        segments: updatedSegmentation.segments,
+      });
+    }
+  }, 1000);
+  const { unsubscribe: debouncedUnsubscribe } = segmentationService.subscribe(
+    segmentationService.EVENTS.SEGMENTATION_DATA_MODIFIED,
+    payload => {
+      if (!isRestoring()) {
+        updateStats(payload);
+      }
+    }
   );
 
   const unsubscribe = () => {
     isUnsubscribed = true;
+    updateStats.cancel();
     debouncedUnsubscribe();
   };
   return { unsubscribe };

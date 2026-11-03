@@ -5,6 +5,9 @@ import cn.colla.phaseone.dashboard.DashboardDtos.*;
 import cn.colla.phaseone.identity.IdentityDtos.Data;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -12,8 +15,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1")
 public class DashboardController {
-    private final DashboardMockService dashboard;
-    public DashboardController(DashboardMockService dashboard) { this.dashboard = dashboard; }
+    private final DashboardService dashboard;
+    public DashboardController(DashboardService dashboard) { this.dashboard = dashboard; }
 
     @GetMapping("/teams/{teamId}/tasks")
     public Data<TaskList<TeamTaskCard>> teamTasks(@AuthenticationPrincipal SessionPrincipal principal, @PathVariable String teamId) {
@@ -23,6 +26,12 @@ public class DashboardController {
     @GetMapping("/tasks/recent")
     public Data<TaskList<RecentTaskCard>> recentTasks(@AuthenticationPrincipal SessionPrincipal principal) {
         return new Data<>(dashboard.recentTasks(principal.uid()));
+    }
+
+    @PostMapping("/tasks/{taskId}/visits")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void visit(@AuthenticationPrincipal SessionPrincipal principal, @PathVariable String taskId) {
+        dashboard.visit(principal.uid(), taskId);
     }
 
     @GetMapping("/tasks/{taskId}/members")

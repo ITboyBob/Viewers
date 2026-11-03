@@ -1,5 +1,11 @@
-import { ToolGroupManager, Enums, Types } from '@cornerstonejs/tools';
-import { eventTarget } from '@cornerstonejs/core';
+import {
+  ToolGroupManager,
+  Enums,
+  Types,
+  cancelActiveManipulations,
+  state as toolsState,
+} from '@cornerstonejs/tools';
+import { eventTarget, getEnabledElements } from '@cornerstonejs/core';
 
 import { Types as OhifTypes, pubSubServiceInterface } from '@ohif/core';
 import getActiveViewportEnabledElement from '../../utils/getActiveViewportEnabledElement';
@@ -120,6 +126,16 @@ export default class ToolGroupService {
   }
 
   public destroy(): void {
+    // 离开模式后不能让旧绘制的全局交互锁阻断下一个任务。
+    for (const { viewport } of getEnabledElements()) {
+      try {
+        cancelActiveManipulations(viewport.element);
+      } catch (error) {
+        console.warn('取消已退出视口的绘制失败', error);
+      }
+    }
+    toolsState.isInteractingWithTool = false;
+    toolsState.isMultiPartToolActive = false;
     ToolGroupManager.destroy();
     this.toolGroupIds = new Set();
 

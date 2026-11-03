@@ -16,7 +16,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
-const invalid = (message = '团队页演示读取响应无效，请重试。'): never => {
+const invalid = (message = '任务列表读取响应无效，请重试。'): never => {
   throw new BusinessApiError(502, 'INVALID_RESPONSE', message);
 };
 const utc = (value: unknown): value is string => {
@@ -45,12 +45,13 @@ const card = (value: unknown): value is TeamTaskCard =>
   uuid(value.task_id) &&
   uuid(value.team_id) &&
   text(value.title) &&
-  text(value.subtitle) &&
-  (value.preview_key === 'abdominal-ct' || value.preview_key === 'none');
+  uuid(value.assignee_uid) &&
+  utc(value.created_at) &&
+  utc(value.updated_at);
 const recentCard = (value: unknown): value is RecentTaskCard =>
   card(value) && utc((value as unknown as Record<string, unknown>).last_entered_at);
 
-/** 请求和校验专用；没有跨账号缓存，不接入真实任务写入或访问历史。 */
+/** 请求和校验专用；没有跨账号缓存，不进行隐式业务写入。 */
 export class TeamPageService implements TeamPageApi {
   constructor(private readonly api: BusinessApi) {}
 
@@ -110,10 +111,10 @@ export class TeamPageService implements TeamPageApi {
   private list<T extends TeamTaskCard>(
     value: unknown,
     accepts: (item: unknown) => item is T
-  ): { items: T[]; total: number; mock: true } {
+  ): { items: T[]; total: number; mock: false } {
     if (
       !record(value) ||
-      value.mock !== true ||
+      value.mock !== false ||
       !Array.isArray(value.items) ||
       !Number.isSafeInteger(value.total) ||
       value.total !== value.items.length
@@ -128,6 +129,6 @@ export class TeamPageService implements TeamPageApi {
       ids.add(item.task_id);
       return item;
     });
-    return { items, total: items.length, mock: true };
+    return { items, total: items.length, mock: false };
   }
 }

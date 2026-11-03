@@ -2,7 +2,6 @@ import React from 'react';
 import { GridIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
 import type { BusinessTeamMembership, RecentTaskList, TeamTaskList } from '@ohif/core';
 import ohifMark from '../Account/assets/ohif-mark.svg';
-import preview from './assets/team-task-preview.png';
 import '../Account/Account.css';
 import '../../business/components/BusinessFonts.css';
 import './TeamPage.css';
@@ -22,9 +21,13 @@ export type TeamPageProps = {
   createTaskSlot?: React.ReactNode;
   memberSlot?: React.ReactNode;
   notificationSlot?: React.ReactNode;
+  taskStatusSlot?: React.ReactNode;
+  onOpenTask?(taskId: string): void;
+  canOpenTask?(taskId: string): boolean;
+  openingTaskId?: string | null;
 };
 
-/** 只呈现读取投影及切换意图；卡片不入台，不产生真实访问记录。 */
+/** 只呈现读取投影及切换意图；打开意图交由业务容器验证和激活。 */
 export default function TeamPage({
   view,
   team,
@@ -35,6 +38,10 @@ export default function TeamPage({
   memberSlot,
   createTaskSlot,
   notificationSlot,
+  taskStatusSlot,
+  onOpenTask,
+  canOpenTask,
+  openingTaskId,
 }: TeamPageProps) {
   const heading = view === 'team' ? '团队任务' : '最近任务';
   const Heading = view === 'team' ? 'h2' : 'h1';
@@ -167,6 +174,7 @@ export default function TeamPage({
                 )}
               </div>
             )}
+            {taskStatusSlot}
             {state.status === 'ready' &&
               (state.data.items.length === 0 ? (
                 <p role="status">暂无任务</p>
@@ -177,30 +185,27 @@ export default function TeamPage({
                       className="team-page-card"
                       key={task.task_id}
                     >
-                      <div className="team-page-preview">
-                        {task.preview_key === 'abdominal-ct' ? (
-                          <img
-                            src={preview}
-                            alt="示例影像预览"
-                          />
-                        ) : (
-                          <span>暂无示例预览</span>
-                        )}
-                      </div>
-                      <div className="team-page-card-info">
-                        <h3>{task.title}</h3>
-                        <p>{task.subtitle}</p>
-                      </div>
+                      <button
+                        type="button"
+                        className="team-page-card-open"
+                        data-task-id={task.task_id}
+                        aria-label={`打开任务 ${task.title}`}
+                        disabled={!onOpenTask || !!openingTaskId}
+                        onClick={() => onOpenTask?.(task.task_id)}
+                      >
+                        <div className="team-page-preview">
+                          <span>本地影像任务</span>
+                        </div>
+                        <div className="team-page-card-info">
+                          <h3>{task.title}</h3>
+                          <p>创建于 {new Date(task.created_at).toLocaleString()}</p>
+                          <p>{canOpenTask?.(task.task_id) ? '本地影像可打开' : '需重新导入影像'}</p>
+                        </div>
+                      </button>
                     </article>
                   ))}
                 </div>
               ))}
-            <p
-              className="team-page-demo"
-              role="note"
-            >
-              示例数据：任务、预览及历史记录仅用于演示，不代表真实访问或任务授权。
-            </p>
           </section>
         </main>
       </div>

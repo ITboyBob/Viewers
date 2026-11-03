@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { DicomMetadataStore } from '@ohif/core';
 import type {
   BusinessServices,
@@ -24,6 +24,8 @@ export default function useLocalTaskImport(
     runtime = business?.projectRuntime;
   const publisher = business?.localCollaboration?.publisher;
   const navigate = useNavigate();
+  const location = useLocation();
+  const taskReturnTo = location.pathname === '/team/recent' ? '/team/recent' : '/team/tasks';
   const mounted = useRef(true),
     locked = useRef(false),
     transferred = useRef(false);
@@ -31,6 +33,7 @@ export default function useLocalTaskImport(
   const publicationRef = useRef<ReturnType<SharedFilePublicationPort['prepare']> | null>(null);
   const preparedRef = useRef<{ project: LocalProject; scope: LocalImportScope } | null>(null);
   const ownsAttempt = useRef(false);
+  const visitController = useRef<AbortController | null>(null);
   const [status, setStatus] = React.useState<'idle' | 'parsing' | 'registering'>('idle');
   const [error, setError] = React.useState('');
   const [failures, setFailures] = React.useState<readonly BatchFailure[]>([]);
@@ -41,6 +44,7 @@ export default function useLocalTaskImport(
     mounted.current = true;
     const unsubscribe = projects?.subscribe(() => {
       if (projectRef.current?.phase === 'invalid' && !transferred.current) {
+        visitController.current?.abort();
         tasks?.cancel(projectRef.current);
         publicationRef.current?.cancel();
         preparedRef.current?.scope.release();
@@ -56,9 +60,11 @@ export default function useLocalTaskImport(
     });
     return () => {
       mounted.current = false;
+      visitController.current?.abort();
       unsubscribe?.();
       if (!transferred.current && ownsAttempt.current) {
         if (projectRef.current) {
+          visitController.current?.abort();
           tasks?.cancel(projectRef.current);
         }
         publicationRef.current?.cancel();
@@ -66,7 +72,15 @@ export default function useLocalTaskImport(
           preparedRef.current?.scope.release();
         } finally {
           if (projects?.getCurrent() === projectRef.current) {
-            projects?.dispose();
+            const current = projectRef.current;
+            if (
+              current?.phase === 'registered' &&
+              projects.getRetained?.(current.task_id!) === current
+            ) {
+              projects.suspend();
+            } else {
+              projects?.dispose();
+            }
           }
         }
       }
@@ -78,6 +92,9 @@ export default function useLocalTaskImport(
       throw new Error('业务服务尚未初始化');
     }
     setStatus('registering');
+    if (projects.getCurrent() !== project && projects.getRetained?.(project.task_id!) === project) {
+      projects.activate(project.task_id!);
+    }
     if (preparedRef.current?.project !== project) {
       preparedRef.current?.scope.release();
       preparedRef.current = {
@@ -89,12 +106,17 @@ export default function useLocalTaskImport(
       };
     }
     await tasks.register(project);
+    visitController.current?.abort();
+    const visit = new AbortController();
+    visitController.current = visit;
+    await tasks.visit?.(project.task_id!, visit.signal);
     if (!mounted.current || !projects.isCurrent(project)) {
       return;
     }
     const { scope } = preparedRef.current;
     let handle: ProjectLifecycleHandle | undefined;
     try {
+      projects.retain?.(project);
       scope.activate();
       handle = runtime.bind(project, scope);
       // 共享存储是独立增量；失败／慢写不阻塞原导航与事件桥接。
@@ -103,7 +125,9 @@ export default function useLocalTaskImport(
       project.study_uids.forEach(uid => query.append('StudyInstanceUIDs', uid));
       query.append('datasources', 'dicomlocal');
       transferred.current = true;
-      navigate(`/${project.mode_path}?${query.toString()}`, { state: { phaseOneMask: true } });
+      navigate(`/${project.mode_path}?${query.toString()}`, {
+        state: { phaseOneMask: true, taskReturnTo },
+      });
     } catch (error) {
       transferred.current = false;
       publisher?.cancel(project);
@@ -112,6 +136,9 @@ export default function useLocalTaskImport(
           handle.releaseScope();
         } else {
           scope.release();
+          if (projects.getCurrent() === project) {
+            projects.suspend?.();
+          }
         }
       } finally {
         preparedRef.current = null;
@@ -179,7 +206,12 @@ export default function useLocalTaskImport(
         }
         setError(error instanceof Error ? error.message : '导入或登记失败，请重试');
         const project = projectRef.current;
-        setRetryProject(project && projects.isCurrent(project) ? project : null);
+        setRetryProject(
+          project &&
+            (projects.isCurrent(project) || projects.getRetained?.(project.task_id!) === project)
+            ? project
+            : null
+        );
       }
     } finally {
       locked.current = false;

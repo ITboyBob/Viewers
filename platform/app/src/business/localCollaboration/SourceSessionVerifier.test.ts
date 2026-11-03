@@ -239,7 +239,7 @@ describe('源会话无干扰复核', () => {
         aborted: signal.aborted,
       }).toEqual({
         status: 'invalid',
-        phase: 'invalid',
+        phase: 'disposed',
         callbacks: 0,
         aborted: true,
       });

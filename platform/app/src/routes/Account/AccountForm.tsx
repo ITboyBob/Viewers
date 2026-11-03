@@ -12,6 +12,8 @@ export default function AccountForm({ mode }: { mode: 'login' | 'register' }) {
   const services = useBusinessServices();
   const navigate = useNavigate();
   const location = useLocation();
+  const logoutWarning =
+    typeof location.state?.logoutWarning === 'string' ? location.state.logoutWarning : '';
   const sharedTaskId = sharedAuthTaskFromSearch(location.search, location.hash);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -69,6 +71,7 @@ export default function AccountForm({ mode }: { mode: 'login' | 'register' }) {
   };
   return (
     <AccountLayout mode={mode}>
+      {logoutWarning && <p role="alert">{logoutWarning}</p>}
       <form
         className="account-form"
         onSubmit={submit}

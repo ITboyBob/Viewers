@@ -9,10 +9,11 @@ const card = () => ({
   task_id: task,
   team_id: team,
   title: '肝脏轮廓标注',
-  subtitle: '示例文件',
-  preview_key: 'abdominal-ct',
+  assignee_uid: '30000000-0000-4000-8000-000000000001',
+  created_at: '2026-11-01T00:00:00Z',
+  updated_at: '2026-11-01T00:00:00Z',
 });
-const list = () => ({ items: [card()], total: 1, mock: true });
+const list = () => ({ items: [card()], total: 1, mock: false });
 const recent = () => ({
   ...list(),
   items: [{ ...card(), last_entered_at: '2026-11-01T08:00:00Z' }],
@@ -56,18 +57,18 @@ test.each([
   null,
   [],
   {},
-  { ...list(), mock: false },
+  { ...list(), mock: true },
   { ...list(), mock: undefined },
   { ...list(), total: 2 },
   { ...list(), total: -1 },
   { ...list(), total: 1.5 },
   { ...list(), items: {} },
-  { items: [card(), card()], total: 2, mock: true },
-  ...['task_id', 'team_id', 'title', 'subtitle', 'preview_key'].map(key => ({
+  { items: [card(), card()], total: 2, mock: false },
+  ...['task_id', 'team_id', 'title', 'assignee_uid', 'created_at', 'updated_at'].map(key => ({
     ...list(),
     items: [{ ...card(), [key]: '' }],
   })),
-  { ...list(), items: [{ ...card(), preview_key: 'https://private.invalid/image' }] },
+  { ...list(), items: [{ ...card(), created_at: 'https://private.invalid/image' }] },
   { ...list(), items: [{ ...card(), team_id: otherTask }] },
 ])('拒绝不符合列表契约的响应 %#', async value => {
   const { service } = setup(value);
@@ -77,12 +78,11 @@ test.each([
   });
 });
 
-test('空列表与 none 预览合法，最近任务允许非入队团队', async () => {
-  const { request, service } = setup({ items: [], total: 0, mock: true });
-  await expect(service.listTeamTasks(team)).resolves.toEqual({ items: [], total: 0, mock: true });
+test('真实空列表合法，最近任务保留服务器授权的团队身份', async () => {
+  const { request, service } = setup({ items: [], total: 0, mock: false });
+  await expect(service.listTeamTasks(team)).resolves.toEqual({ items: [], total: 0, mock: false });
   const value = recent();
   value.items[0].team_id = otherTask;
-  value.items[0].preview_key = 'none';
   request.mockResolvedValue(value);
   await expect(service.listRecentTasks()).resolves.toEqual(value);
 });
@@ -97,12 +97,12 @@ test.each([
       { ...recent().items[0], task_id: otherTask, last_entered_at: '2026-11-02T08:00:00Z' },
     ],
     total: 2,
-    mock: true,
+    mock: false,
   },
   {
     items: [{ ...recent().items[0], task_id: otherTask }, recent().items[0]],
     total: 2,
-    mock: true,
+    mock: false,
   },
 ])('最近任务拒绝缺失时间、非 UTC 与不稳定排序 %#', async value => {
   await expect(setup(value).service.listRecentTasks()).rejects.toMatchObject({
@@ -142,7 +142,7 @@ test('ISO UTC 保留微秒／纳秒精度，毫秒内真实时间优先于任务
     { ...recent().items[0], task_id: otherTask, last_entered_at: '2026-11-01T08:00:00.123456789Z' },
     { ...recent().items[0], last_entered_at: '2026-11-01T08:00:00.123456788Z' },
   ];
-  const value = { items, total: 2, mock: true };
+  const value = { items, total: 2, mock: false };
   await expect(setup(value).service.listRecentTasks()).resolves.toEqual(value);
   await expect(
     setup({ ...value, items: [...items].reverse() }).service.listRecentTasks()
@@ -160,7 +160,7 @@ test('小数末尾零表示同一时刻时按任务 id 排序，仍拒绝无效�
       },
     ],
     total: 2,
-    mock: true,
+    mock: false,
   };
   await expect(setup(value).service.listRecentTasks()).resolves.toEqual(value);
   await expect(

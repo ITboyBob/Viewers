@@ -68,6 +68,12 @@ export class TaskService implements TaskApi {
     private readonly api: BusinessApi,
     private readonly projects: LocalProjects
   ) {}
+  visit(taskId: string, signal?: AbortSignal): Promise<void> {
+    return this.api.request(`/tasks/${encodeURIComponent(taskId)}/visits`, {
+      method: 'POST',
+      signal,
+    });
+  }
   register(project: LocalProject): Promise<BusinessTask> {
     if (
       !this.projects.isCurrent(project) ||

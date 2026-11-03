@@ -27,8 +27,9 @@ const card = {
   task_id: task,
   team_id: team,
   title: '后端演示任务',
-  subtitle: '示例文件',
-  preview_key: 'none',
+  assignee_uid: '30000000-0000-4000-8000-000000000001',
+  created_at: '2026-11-01T00:00:00Z',
+  updated_at: '2026-11-01T00:00:00Z',
 };
 let transport: jest.Mock;
 function Location() {
@@ -75,9 +76,9 @@ beforeEach(async () => {
                 },
               ],
               total: 1,
-              mock: true,
+              mock: false,
             }
-          : { items: [card], total: 1, mock: true };
+          : { items: [card], total: 1, mock: false };
     return { ok: true, status: 200, json: async () => ({ data }) } as Response;
   });
   mockServices = createBusinessServices({ enabled: true }, { fetch: transport, storage: null });
@@ -106,7 +107,7 @@ test('团队页个人入口传真实默认自有团队，通知不接协作 mock
     screen.getByRole('menuitemradio', { name: /团队页用户的团队/ }).getAttribute('aria-checked')
   ).toBe('true');
   expect(screen.getByRole('menuitem', { name: '退出登录' }).getAttribute('aria-disabled')).toBe(
-    'true'
+    'false'
   );
   expect(forUser).not.toHaveBeenCalled();
 });

@@ -274,12 +274,6 @@ export default function ModeRoute({
         });
     };
     const setupRouteInit = async () => {
-      if (phaseOneMask) {
-        servicesManager.services.businessServices?.projectRuntime?.beginMode(
-          servicesManager.services,
-          dataSourceName
-        );
-      }
       // TODO: For some reason this is running before the Providers
       // are calling setServiceImplementation
       // TODO -> iterate through services.
@@ -403,8 +397,17 @@ export default function ModeRoute({
       }
     });
     setupRouteInit()
-      .then(() => {
+      .then(async () => {
         if (!exited) {
+          if (phaseOneMask && sharedGeneration === undefined) {
+            await servicesManager.services.businessServices?.projectRuntime?.restoreMode(
+              servicesManager.services,
+              dataSourceName
+            );
+          }
+          if (exited) {
+            return;
+          }
           mode?.onSetupRouteComplete?.({ servicesManager, extensionManager, commandsManager });
           const shared = servicesManager.services.businessServices?.localCollaboration;
           if (sharedGeneration !== undefined) {
@@ -412,8 +415,13 @@ export default function ModeRoute({
           }
         }
       })
-      .catch(() => {
+      .catch(error => {
         if (!exited) {
+          servicesManager.services.uiNotificationService?.show({
+            title: '任务打开失败',
+            message: error instanceof Error ? error.message : '请返回列表后重试',
+            type: 'warning',
+          });
           try {
             lifetime.current.dispose();
           } finally {

@@ -225,11 +225,6 @@
   font-size: 12px;
   line-height: 20px;
 }
-.team-page-demo {
-  color: var(--account-muted);
-  font-size: 12px;
-  line-height: 20px;
-}
 
 .team-page-create {
   display: flex;
@@ -257,4 +252,23 @@
 .team-page-import-failures {
   overflow-wrap: anywhere;
   max-width: 100%;
+}
+
+.team-page-card-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.team-page-card-open:focus-visible {
+  outline: 2px solid var(--account-accent);
+  outline-offset: -2px;
+}
+.team-page-card-open:disabled {
+  cursor: default;
 }

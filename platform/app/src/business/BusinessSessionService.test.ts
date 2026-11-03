@@ -362,3 +362,34 @@ test('服务端额外返回的凭据或内部字段不进入公开快照，合�
   expect(Object.hasOwn(snapshot.context!, 'token')).toBe(false);
   expect(Object.hasOwn(snapshot.context!.user, 'password_hash')).toBe(false);
 });
+
+test('注销使用原凭证立即请求DELETE并同步清本地；晚到失败不能清除新登录', async () => {
+  let rejectLogout!: (error: Error) => void;
+  const transport = jest
+    .fn()
+    .mockResolvedValueOnce(response(201, issued()))
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectLogout = reject;
+        })
+    )
+    .mockResolvedValueOnce(response(201, issued('bob')));
+  const { session } = createBusinessServices(
+    { enabled: true },
+    { fetch: transport, storage: sessionStorage }
+  );
+  await session.login({ username: 'alice', password: 'x' });
+  const pending = session.logout();
+  const failure = expect(pending).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+  expect(transport.mock.calls[1][1]).toMatchObject({
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer alice-token' },
+  });
+  expect(session.getSnapshot().status).toBe('invalid');
+  expect(sessionStorage.getItem(key)).toBeNull();
+  await session.login({ username: 'bob', password: 'x' });
+  rejectLogout(new Error('synthetic network failure'));
+  await failure;
+  expect(session.getSnapshot().context?.user.uid).toBe('bob');
+});

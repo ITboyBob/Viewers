@@ -190,3 +190,14 @@ describe('HangingProtocolService', () => {
     });
   });
 });
+
+test('相同StudyUID的新任务必须重新绑定当前study对象，不能保留上次匹配对象', () => {
+  const hps = new HangingProtocolService({}, {});
+  const first = { StudyInstanceUID: 'same-study' };
+  hps.studies = [first];
+  hps.setActiveStudyUID('same-study');
+  const next = { StudyInstanceUID: 'same-study' };
+  hps.studies = [next];
+  hps.setActiveStudyUID('same-study');
+  expect(hps.activeStudy).toBe(next);
+});

@@ -2,6 +2,7 @@ import React, { useEffect, useReducer } from 'react';
 import SharedLinkButton from './SharedLinkButton';
 import type { BusinessServices } from '@ohif/core';
 import useBusinessSession from '../useBusinessSession';
+import useBusinessLogout from '../useBusinessLogout';
 import MemberOverlay from './MemberOverlay';
 import TaskMembersOverlay from './TaskMembersOverlay';
 import NotificationDialog from './NotificationDialog';
@@ -20,6 +21,7 @@ export default function BusinessTopBar({
   taskMembers?: boolean;
 }) {
   const snapshot = useBusinessSession(services.session);
+  const logout = useBusinessLogout(services);
   const [, refreshSharing] = useReducer(value => value + 1, 0);
   const shared = services.localCollaboration;
   useEffect(() => shared?.publisher?.subscribe(refreshSharing), [shared?.publisher]);
@@ -63,6 +65,7 @@ export default function BusinessTopBar({
         <MemberOverlay
           key={`member:${user.uid}`}
           user={user}
+          onLogout={logout}
         />
       )}
       {page === 'import' && (

@@ -135,6 +135,12 @@ export class BusinessSessionService implements BusinessSession {
     this.removeStored();
     this.publish({ status: 'invalid', context: null, currentTeamId: null, error: null });
   };
+  logout = (): Promise<void> => {
+    // request 在首个 await 前捕获当前凭证；同步清理本地，不等待网络。
+    const pending = this.api.request<void>('/auth/sessions/current', { method: 'DELETE' });
+    this.invalidate();
+    return pending;
+  };
   private authenticated(context: SessionContext, preserveCandidate: boolean) {
     const candidate =
       preserveCandidate && context.memberships.some(member => member.team_id === this.teamCandidate)

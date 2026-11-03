@@ -7,6 +7,7 @@ import type {
   ProjectRuntime,
   ProjectAnnotationServices,
   TaskApi,
+  ProjectWorkspaceAdapter,
 } from '@ohif/core';
 import { ProjectUpdateBridge } from './ProjectUpdateBridge';
 
@@ -18,14 +19,70 @@ type Binding = {
   scope: LocalImportScope;
   generation: number;
   stopBridge?: () => void;
+  restoreController: AbortController;
+  restored: boolean;
+  captured: boolean;
+  notify?: (message: string) => void;
 };
 export class ProjectRuntimeService implements ProjectRuntime {
   private binding: Binding | null = null;
+  private adapter?: ProjectWorkspaceAdapter;
+  setSnapshotAdapter(adapter: ProjectWorkspaceAdapter) {
+    this.adapter = adapter;
+  }
+  prepareSuspend() {
+    const binding = this.binding;
+    if (
+      binding &&
+      !binding.captured &&
+      this.projects.isCurrent(binding.project) &&
+      binding.project.phase === 'registered' &&
+      binding.project.mode_path === 'segmentation/dicomlocal' &&
+      this.adapter
+    ) {
+      if (!binding.restored) {
+        throw new Error('任务仍在恢复，请稍后返回');
+      }
+      this.projects.setWorkspaceState?.(binding.project, this.adapter.capture(binding.project));
+      binding.captured = true;
+    }
+  }
+  async restoreMode(services: ProjectAnnotationServices, dataSourceName?: string) {
+    const binding = this.binding;
+    if (!binding) {
+      return;
+    }
+    binding.notify = message =>
+      services.uiNotificationService?.show({ title: '任务恢复', message, type: 'warning' });
+    const state = this.projects.getWorkspaceState?.(binding.project);
+    if (state !== undefined) {
+      if (!this.adapter) {
+        throw new Error('任务恢复适配器不可用');
+      }
+      binding.restored = false;
+      if (state && typeof state === 'object' && 'captureError' in state) {
+        throw new Error(String(state.captureError));
+      }
+      await this.adapter.restore(binding.project, state, binding.restoreController.signal);
+    }
+    if (
+      this.binding !== binding ||
+      binding.restoreController.signal.aborted ||
+      !this.projects.isCurrent(binding.project)
+    ) {
+      return;
+    }
+    binding.restored = true;
+    this.beginMode(services, dataSourceName);
+  }
   constructor(
     private readonly projects: LocalProjects,
     private readonly tasks?: TaskApi,
     private readonly onDeactivate?: (project: LocalProject) => void
   ) {}
+  get restoringWorkspace() {
+    return !!this.binding && !this.binding.restored;
+  }
   get phaseOneMask() {
     return this.binding !== null;
   }
@@ -88,6 +145,27 @@ export class ProjectRuntimeService implements ProjectRuntime {
         binding.active = false;
         binding.generation++;
         binding.stopBridge?.();
+        binding.restoreController.abort();
+        if (
+          !binding.captured &&
+          binding.restored &&
+          this.projects.isCurrent(project) &&
+          project.phase === 'registered' &&
+          project.mode_path === 'segmentation/dicomlocal' &&
+          this.adapter
+        ) {
+          try {
+            this.prepareSuspend();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '任务快照保存失败，请先导出';
+            this.projects.setWorkspaceState?.(project, {
+              captureError: message,
+              previous: this.projects.getWorkspaceState?.(project),
+            });
+            binding.notify?.(message);
+          }
+          binding.captured = true;
+        }
         this.onDeactivate?.(project);
       },
       releaseScope: () => {
@@ -106,7 +184,11 @@ export class ProjectRuntimeService implements ProjectRuntime {
             this.binding = null;
           }
           if (this.projects.getCurrent() === project) {
-            this.projects.dispose();
+            if (project.phase === 'registered' && this.projects.suspend) {
+              this.projects.suspend();
+            } else {
+              this.projects.dispose();
+            }
           }
         }
       },
@@ -118,11 +200,14 @@ export class ProjectRuntimeService implements ProjectRuntime {
       lifecycle: createModeProjectLifecycle(handle),
       scope,
       generation: 0,
+      restoreController: new AbortController(),
+      restored: this.projects.getWorkspaceState?.(project) === undefined,
+      captured: false,
     };
     this.binding = binding;
     const unsubscribeProject = this.projects.subscribe?.(() => {
       if (!this.projects.isCurrent(project)) {
-        handle.deactivate();
+        handle.releaseScope();
       }
     });
     return binding.handle;

@@ -11,6 +11,8 @@ export const setUpSegmentationEventHandlers = ({ servicesManager, commandsManage
       segmentationService,
       customizationService,
       commandsManager,
+      isRestoring: () =>
+        servicesManager.services.businessServices?.projectRuntime?.restoringWorkspace === true,
     });
 
   const { unsubscribe: unsubscribeSegmentationModifiedHandler } = setupSegmentationModifiedHandler({

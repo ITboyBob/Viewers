@@ -49,6 +49,7 @@
     "tests/local-shared/**/*.ts",
     "extensions/default/src/ViewerLayout/ViewerHeader.tsx",
     "extensions/cornerstone/src/Viewport/Overlays/CornerstoneOverlays.tsx",
+    "extensions/cornerstone/src/utils/ProjectWorkspaceAdapter.ts",
     "extensions/cornerstone/src/Viewport/Overlays/RemoteCursor*.ts",
     "extensions/cornerstone/src/Viewport/Overlays/RemoteCursor*.tsx",
     "extensions/cornerstone/src/Viewport/Overlays/remoteCursorProjection.ts",

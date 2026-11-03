@@ -204,7 +204,8 @@ export function createBusinessServices(
     });
     if (typeof window !== 'undefined') {
       window.addEventListener('pagehide', () => {
-        projectRuntime.getHandle()?.deactivate();
+        projectRuntime.getHandle()?.releaseScope();
+        localProjects.disposeAll();
         shared.sharedView?.dispose();
         shared.participation?.close('exit');
         shared.publisher?.cancel();
