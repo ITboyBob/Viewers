@@ -6,7 +6,9 @@
 接口文档描述后续开发约定，当前本地演示支持 `.ohifmask` 文件保存 / 载入、浏览器本地自动暂存恢复、
 阈值实时预览及三维 ROI，尚未接入后端保存。
 各轮优化的内容、原因与收益见 [优化记录](OPTIMIZATION_LOG.md)。
-最近五轮的详细整理见 [最近五轮优化详细说明](LAST_FIVE_OPTIMIZATIONS.md)。
+前五轮优化的详细整理见 [五轮优化详细说明](LAST_FIVE_OPTIMIZATIONS.md)。
+新增的三维形态学、连通区域清理及验证结果见 [三维精修说明](MASK_REFINEMENT_NOTES.md)。
+本次从导入到编辑、保存和导出的完整检查见 [全流程回归报告](FULL_REGRESSION_REPORT.md)。
 公开真实 CT 的验证结果与重跑方式见 [真实 DICOM 测试报告](REAL_DICOM_TEST_REPORT.md)。
 
 ---

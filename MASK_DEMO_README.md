@@ -98,6 +98,12 @@ corepack yarn install --frozen-lockfile
     矩形默认贯穿整组，起止层按原始扫描方向排序；已有 ROI 可随布局切换继续用于 MPR。
     ROI 使用患者空间中的定向包围盒，支持倾斜采集和不等像素间距；范围外标注及其他 Mask 保留。
     “清除 ROI 限制”恢复原有整组 / 单片处理。ROI 不限制画笔、填洞或拆分，当前不写入标注文件或暂存。
+13. “编辑”页下方新增三维形态学精修：膨胀、腐蚀、开、闭和平滑（先开后闭），半径使用 mm。
+    连通区域清理支持保留最大区域、按 mm³ 删除小碎片、点选预览删除整个三维区域。
+    先预览绿色新增 / 品红删除及整组统计，再应用；操作可整组撤销重做，不覆盖其他 Mask。
+    计算期间显示整体进度和阶段，可点击“取消精修计算”；取消不修改选区或撤销历史。
+    这些工具处理整个当前 Mask，不受阈值 ROI 限制，需至少两张可重建的静态切片；细节与实测见
+    [三维精修说明](MASK_REFINEMENT_NOTES.md)。
 
 ## 保存后继续编辑
 
@@ -158,7 +164,7 @@ corepack yarn test:mask-editing
 算法与适配测试覆盖阈值边界、HU 换算、其他 Mask 保护、锁定拦截、切片对应、正交坐标、
 填洞连通性、拆分编号、像素与元数据撤销重做。此测试命令需要 Node.js 22.18 或更新版本。
 
-本机已通过 151 项算法、文件校验与适配测试，新增改动未引入类型诊断，并通过无界面 Edge 浏览器中的实际操作验证。
+本机已通过 176 项算法、文件校验与适配测试，新增改动未引入类型诊断，并通过无界面 Edge 浏览器中的实际操作验证。
 浏览器验证覆盖本地 DICOM 导入、新建 Mask、阈值选区、填洞、拆分、原生橡皮擦切断后再次拆分，
 以及像素与 Segment 信息的撤销重做，未出现浏览器脚本错误。
 
@@ -203,6 +209,16 @@ corepack yarn test:mask-editing
 执行 `corepack yarn test:mask-safety` 或 `corepack yarn test:mask-safety abdomen-ct`，可分别在合成 CT 或
 52 张真实腹部 CT 上验证阈值预览、ROI 指定层和范围外保护、独立 BFS 核对区域生长、MPR 单片编辑与撤销、
 未保存提醒、实际刷新后恢复，以及模拟存储空间不足后的事务回滚。报告位于 `.cache/mask-safety/`。
+
+执行 `corepack yarn test:mask-refinement` 或 `corepack yarn test:mask-refinement abdomen-ct`，
+可验证三维形态学和连通清理的只读预览、逐体素独立参考、整组撤销重做、实际点选、MPR、过期快照拒绝及
+精修结果的 `.ohifmask` 保存。报告位于 `.cache/mask-refinement/`。
+
+执行 `corepack yarn test:mask-refinement-cancel`，使用真实腹部 CT 验证实际取消、单调进度、旧取消令牌隔离及取消后继续操作。
+已执行 `corepack yarn demo:real-data` 并启动服务后，`corepack yarn test:mask-all` 可顺序运行单元测试、依赖补丁核对、
+全部 14 个功能浏览器脚本及 4 个真实数据检查任务。完整数据预检要求肺部 114 张、腹部 52 张。
+每项日志和总结果写入 `.cache/full-mask-regression/`，便于组员定位失败步骤；本次结果见
+[全流程回归报告](FULL_REGRESSION_REPORT.md)。
 
 执行 `corepack yarn demo:real-data` 下载两组公开真实 CT 的元数据和像素，并封装为本地 DICOM，
 共 166 张、约 83.3 MiB；`corepack yarn test:mask-real` 可进行完整真实数据回归。

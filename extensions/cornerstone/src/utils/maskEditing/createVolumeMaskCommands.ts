@@ -13,6 +13,7 @@ import { markSeedComponent, analyzeMaskComponents } from './volumeAlgorithms';
 import { reportMaskOperation } from './maskOperationEvents';
 import type { MaskSplitPreview, VolumeSplitAnalysis } from './splitMaskTypes';
 import createMaskProjectCommands from './createMaskProjectCommands';
+import createMaskRefinementCommands from './createMaskRefinementCommands';
 import {
   validateRoiInstance,
   roiSelectionForInstance,
@@ -677,6 +678,15 @@ export default function createVolumeMaskCommands({
   }
 
   return {
+    ...createMaskRefinementCommands({
+      servicesManager,
+      exclusive,
+      targetFor,
+      ensureTarget,
+      maskVolumeFor,
+      saveHistory,
+      rollback,
+    }),
     ...createMaskProjectCommands({ servicesManager, commandsManager }, exclusive),
     exportMaskSegmentation: ({ segmentationId }: { segmentationId?: string } = {}) =>
       exclusive('正在准备整个标注集的 DICOM SEG…', async () => {

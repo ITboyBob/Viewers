@@ -34,6 +34,13 @@ function createTools({ utilityModule, commandsManager }) {
         },
       },
       {
+        toolName: 'MaskRemoveRegion',
+        configuration: {
+          onSeed: options =>
+            commandsManager.run('previewMaskRefinement', { ...options, operation: 'removeSeed' }),
+        },
+      },
+      {
         toolName: 'CircularBrush',
         parentTool: 'Brush',
         configuration: {

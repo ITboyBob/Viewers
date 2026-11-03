@@ -3,7 +3,8 @@
 版本：v0.1，供小组开发和联调使用。适用分支：`codex/mask-tools`。
 
 **本文是待实现的接口约定，不代表仓库中已有后端服务。** 当前演示使用浏览器本地 DICOM，
-标注保存在内存中；本分支尚未接入下述保存、上传、自动保存和恢复接口。
+运行时标注驻留浏览器，已支持 `.ohifmask` 文件保存恢复及浏览器本地自动暂存；
+本分支尚未接入下述远端保存、上传、自动保存和恢复接口。
 使用方法见 [MASK_DEMO_README.md](MASK_DEMO_README.md)，可导入 Swagger Editor / Apifox 的业务接口定义见
 [docs/mask-backend.openapi.yaml](docs/mask-backend.openapi.yaml)。
 
@@ -19,7 +20,8 @@
 | Mask 名称、颜色、显隐、锁定状态与像素一起保存 | 前后端共同 | P0 |
 | 阈值、画笔、橡皮擦、Region Grow、填洞、Split Mask | 当前前端已有；本期继续在前端执行 | 已有 |
 | MPR、三维表面显示及本次编辑会话的撤销重做 | 当前前端 | 已有 |
-| 前端 DICOM SEG 序列化 / 恢复适配、保存按钮、自动保存和错误提示 | 前端后续接入 | P0 |
+| DICOM SEG 导出、`.ohifmask` 保存恢复、浏览器本地暂存及错误提示 | 当前前端 | 已有 |
+| 基于业务接口的远端保存、自动保存 / 恢复，以及后端 SEG 返回数据的导入适配 | 前端后续接入 | P0 |
 | 历史版本列表、恢复旧版本、软删除、STL / NIfTI 导出、大文件分片上传 | 后续扩展 | P1 |
 
 推荐使用 **Orthanc + DICOMweb 插件**，或已有 DICOMweb PACS。业务后端负责标注记录和文件存储，

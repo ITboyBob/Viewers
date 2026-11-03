@@ -13,6 +13,7 @@ import type { MaskSplitPreview } from '../utils/maskEditing/splitMaskTypes';
 import './MaskWorkbench.css';
 import MaskProgressPanel from './MaskProgressPanel';
 import MaskThresholdPreview from './MaskThresholdPreview';
+import MaskRefinementPanel from './MaskRefinementPanel';
 import { MaskRoi, maskRoiSettings } from '../utils/maskEditing/maskRoi';
 
 const stages = [
@@ -122,6 +123,7 @@ export default function MaskEditingTools() {
       setTool(name);
       setRegionArmed(name === 'MaskRegionGrow');
       if (name === 'MaskRegionGrow') setStage('grow');
+      else if (name === 'MaskRemoveRegion') setStage('edit');
       else if (/Brush|Eraser/.test(name)) {
         setStage('edit');
         setShape(name.includes('Sphere') ? 'sphere' : 'circle');
@@ -224,7 +226,10 @@ export default function MaskEditingTools() {
   function selectStage(next: Stage) {
     try {
       if (
-        (next !== 'edit' && (/Brush|Eraser/.test(tool) || tool === 'MaskRegionGrow')) ||
+        (next !== 'edit' &&
+          (/Brush|Eraser/.test(tool) ||
+            tool === 'MaskRegionGrow' ||
+            tool === 'MaskRemoveRegion')) ||
         (next !== 'grow' && tool === 'MaskRegionGrow')
       ) {
         commandsManager.run('setToolActiveToolbar', { toolName: 'WindowLevel' });
@@ -292,19 +297,21 @@ export default function MaskEditingTools() {
       ? 'threshold'
       : 'brush';
   const toolLabel =
-    tool === 'MaskRegionGrow'
-      ? '区域生长 · 点选'
-      : tool.includes('Eraser')
-        ? '橡皮擦'
-        : tool.startsWith('Threshold')
-          ? '阈值笔刷'
-          : tool.includes('Brush')
-            ? '画笔'
-            : tool === 'Pan'
-              ? '平移'
-              : tool === 'Zoom'
-                ? '缩放'
-                : '窗宽 / 窗位';
+    tool === 'MaskRemoveRegion'
+      ? '连通区域删除 · 点选预览'
+      : tool === 'MaskRegionGrow'
+        ? '区域生长 · 点选'
+        : tool.includes('Eraser')
+          ? '橡皮擦'
+          : tool.startsWith('Threshold')
+            ? '阈值笔刷'
+            : tool.includes('Brush')
+              ? '画笔'
+              : tool === 'Pan'
+                ? '平移'
+                : tool === 'Zoom'
+                  ? '缩放'
+                  : '窗宽 / 窗位';
 
   return (
     <section
@@ -658,6 +665,17 @@ export default function MaskEditingTools() {
           </button>
           <p className="mask-help">填充每张切片中封闭的空白，不覆盖其他 Mask。该操作可撤销。</p>
         </div>
+        <MaskRefinementPanel
+          servicesManager={servicesManager}
+          commandsManager={commandsManager}
+          viewportId={grid?.activeViewportId}
+          segmentationId={active?.segmentationId}
+          segmentIndex={segment?.segmentIndex}
+          enabled={enabled && canReconstruct}
+          busy={busy}
+          visible={stage === 'edit'}
+          run={run}
+        />
       </div>
       <div
         hidden={stage !== 'split'}

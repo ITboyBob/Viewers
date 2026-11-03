@@ -48,6 +48,7 @@ globalThis.__volumeMaskSdk = {
   },
   eventTarget: { dispatchEvent: () => true },
   utilities: {
+    transformWorldToIndex: (_, point) => point,
     uuidv4: () => `whole-operation-${++nextIdentity}`,
     HistoryMemo: { DefaultHistoryMemo: { push: memo => history.push(memo) } },
   },
@@ -70,7 +71,17 @@ const hooks = registerHooks({
     if (specifier === '@cornerstonejs/core') return { url: 'volume-mask:core', shortCircuit: true };
     if (specifier === '@cornerstonejs/tools')
       return { url: 'volume-mask:tools', shortCircuit: true };
-    if (['./maskAlgorithms', './volumeAlgorithms', './maskOperationEvents', './maskRoi'].includes(specifier))
+    if (
+      [
+        './maskAlgorithms',
+        './volumeAlgorithms',
+        './maskOperationEvents',
+        './maskRoi',
+        './createMaskRefinementCommands',
+        './refinementAlgorithms',
+        './maskRefinementEvents',
+      ].includes(specifier)
+    )
       return next(`${specifier}.ts`, context);
     return next(specifier, context);
   },
@@ -535,4 +546,323 @@ test('whole-series filling rolls back earlier slices if the mask becomes locked'
   assert.equal(f.pixels[0][4], 0);
   assert.equal(f.pixels[1][4], 0);
   assert.equal(history.length, 0);
+});
+
+test('3D morphology preview is read-only and applying it protects other masks with one undo/redo', async () => {
+  const f = setup([
+    [1, 0],
+    [2, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+  assert.equal(preview.added, 1);
+  assert.equal(preview.removed, 0);
+  assert.equal(history.length, 0);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [2, 0],
+    ]
+  );
+  await f.commands.applyMaskRefinement({ previewId: preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 1],
+      [2, 0],
+    ]
+  );
+  assert.equal(history.length, 1);
+  history[0].restoreMemo(true);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [2, 0],
+    ]
+  );
+  history[0].restoreMemo(false);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 1],
+      [2, 0],
+    ]
+  );
+});
+test('mask changes invalidate the refinement result before any writes', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+  f.pixels[0][1] = 2;
+  await assert.rejects(f.commands.applyMaskRefinement({ previewId: preview.id }), /已发生修改/);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 2],
+      [0, 0],
+    ]
+  );
+  assert.equal(history.length, 0);
+});
+test('old refinement tokens cannot discard or apply a more recent preview', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const first = await f.commands.previewMaskRefinement({ operation: 'largest' });
+  const second = await f.commands.previewMaskRefinement({
+    operation: 'removeSmall',
+    minimumVolumeMm3: 3,
+  });
+  f.commands.discardMaskRefinementPreview({ previewId: first.preview.id });
+  await assert.rejects(f.commands.applyMaskRefinement({ previewId: first.preview.id }), /失效/);
+  assert.ok(f.commands.getMaskRefinementPreviewData({ previewId: second.preview.id }));
+  await f.commands.applyMaskRefinement({ previewId: second.preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [0, 0],
+      [0, 0],
+    ]
+  );
+});
+test('a no-op refinement does not add a history entry; locked masks reject previews', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({
+    operation: 'dilate',
+    radiusMm: 0.1,
+  });
+  assert.equal((await f.commands.applyMaskRefinement({ previewId: preview.id })).changed, 0);
+  assert.equal(history.length, 0);
+  f.locked = true;
+  await assert.rejects(f.commands.previewMaskRefinement({ operation: 'largest' }), /锁定/);
+});
+test('locking during refinement application rolls back all pixels', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 3 });
+  f.onWrite = () => {
+    f.locked = true;
+  };
+  await assert.rejects(f.commands.applyMaskRefinement({ previewId: preview.id }), /锁定/);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [0, 0],
+    ]
+  );
+  assert.equal(history.length, 0);
+});
+test('physical volume cleanup and seed deletion keep source masks unchanged until application', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({
+    operation: 'removeSeed',
+    worldPoint: [0, 0, 0],
+  });
+  assert.equal(preview.removed, 1);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [0, 1],
+    ]
+  );
+  await f.commands.applyMaskRefinement({ previewId: preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [0, 0],
+      [0, 1],
+    ]
+  );
+});
+test('cancelling a calculation before publication leaves pixels and history unchanged', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const computation = f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+  assert.equal(f.commands.cancelMaskRefinementCalculation().cancelled, true);
+  const result = await computation;
+  assert.equal(result.cancelled, true);
+  assert.equal(result.preview, undefined);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [0, 1],
+    ]
+  );
+  assert.equal(history.length, 0);
+  const next = await f.commands.previewMaskRefinement({ operation: 'largest' });
+  assert.ok(next.preview, 'cancellation must release batch exclusion');
+});
+test('worker progress is not a final result; cancellation terminates the worker and ignores late replies', async () => {
+  const previousWorker = global.Worker,
+    previousDispatch = globalThis.__volumeMaskSdk.eventTarget.dispatchEvent;
+  const events = [];
+  let worker;
+  globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = event => {
+    events.push(event);
+    return true;
+  };
+  global.Worker = class {
+    constructor() {
+      worker = this;
+    }
+    postMessage() {}
+    terminate() {
+      this.terminated = true;
+    }
+  };
+  try {
+    const f = setup([
+      [1, 0],
+      [0, 1],
+    ]);
+    const computation = f.commands.previewMaskRefinement({ operation: 'smooth', radiusMm: 1 });
+    const task = events.find(event => event.type === 'OHIF_MASK_REFINEMENT_TASK').detail;
+    const reply = worker.onmessage;
+    reply({ data: { type: 'progress', completed: 1, total: 4 } });
+    assert.ok(!worker.terminated);
+    assert.equal(
+      f.commands.cancelMaskRefinementCalculation({ taskId: 'stale-task' }).cancelled,
+      false
+    );
+    assert.equal(f.commands.cancelMaskRefinementCalculation({ taskId: task.id }).cancelled, true);
+    assert.ok(worker.terminated);
+    reply({ data: { mask: new Uint8Array(4).fill(1) } });
+    assert.equal((await computation).cancelled, true);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 1],
+      ]
+    );
+    assert.equal(history.length, 0);
+    assert.equal(
+      events.filter(event => event.type === 'OHIF_MASK_REFINEMENT_TASK').at(-1).detail.phase,
+      'cancelled'
+    );
+  } finally {
+    global.Worker = previousWorker;
+    globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = previousDispatch;
+  }
+});
+test('discarding during computation cancels it while an old preview token cannot cancel a newer task', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'largest' });
+  const previousWorker = global.Worker;
+  let worker;
+  global.Worker = class {
+    constructor() {
+      worker = this;
+    }
+    postMessage() {}
+    terminate() {
+      this.terminated = true;
+    }
+  };
+  try {
+    const computation = f.commands.previewMaskRefinement({ operation: 'smooth', radiusMm: 1 });
+    f.commands.discardMaskRefinementPreview({ previewId: preview.id });
+    assert.ok(!worker.terminated);
+    f.commands.discardMaskRefinementPreview();
+    assert.ok(worker.terminated);
+    assert.equal((await computation).cancelled, true);
+    assert.equal(history.length, 0);
+  } finally {
+    global.Worker = previousWorker;
+  }
+});
+test('worker failure terminates computation and allows another operation without partial edits', async () => {
+  const f = setup([
+      [1, 0],
+      [0, 1],
+    ]),
+    previousWorker = global.Worker;
+  let worker;
+  global.Worker = class {
+    constructor() {
+      worker = this;
+    }
+    postMessage() {}
+    terminate() {
+      this.terminated = true;
+    }
+  };
+  try {
+    const computation = f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+    worker.onerror({ preventDefault() {} });
+    await assert.rejects(computation, /计算失败/);
+    assert.ok(worker.terminated);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 1],
+      ]
+    );
+    assert.equal(history.length, 0);
+  } finally {
+    global.Worker = previousWorker;
+  }
+  assert.equal((await f.commands.thresholdMaskSeries({ lower: 1000, upper: 2000 })).changed, 2);
+});
+test('cancellation at final progress cannot publish a preview, and a published preview is no longer cancellable', async () => {
+  const f = setup([
+      [1, 0],
+      [0, 1],
+    ]),
+    previousDispatch = globalThis.__volumeMaskSdk.eventTarget.dispatchEvent;
+  let cancelAtCompletion = true,
+    publishedCancellation;
+  globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = event => {
+    if (
+      event.type === 'OHIF_MASK_REFINEMENT_TASK' &&
+      event.detail.phase === 'running' &&
+      event.detail.percent === 100 &&
+      cancelAtCompletion
+    ) {
+      cancelAtCompletion = false;
+      f.commands.cancelMaskRefinementCalculation({ taskId: event.detail.id });
+    }
+    if (event.type === 'OHIF_MASK_REFINEMENT_PREVIEW' && event.detail.preview)
+      publishedCancellation = f.commands.cancelMaskRefinementCalculation();
+    return true;
+  };
+  try {
+    const cancelled = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+    assert.equal(cancelled.cancelled, true);
+    assert.equal(cancelled.preview, undefined);
+    const completed = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+    assert.ok(completed.preview);
+    assert.equal(publishedCancellation.cancelled, false);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 1],
+      ]
+    );
+    assert.equal(history.length, 0);
+  } finally {
+    globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = previousDispatch;
+  }
 });
