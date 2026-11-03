@@ -4,6 +4,8 @@ import { GridIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
 import type { BusinessTeamMembership, RecentTaskList, TeamTaskList } from '@ohif/core';
 import ohifMark from '../Account/assets/ohif-mark.svg';
 import preview from './assets/team-task-preview.png';
+import '../Account/Account.css';
+import '../../business/components/BusinessFonts.css';
 import './TeamPage.css';
 
 export type TeamPageView = 'team' | 'recent';

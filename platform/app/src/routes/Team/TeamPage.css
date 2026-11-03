@@ -1,6 +1,3 @@
-@import '../Account/Account.css';
-@import '../../business/components/BusinessFonts.css';
-
 /* Figma 团队页两个根：110:1075、133:1164；成员按更新规范迁到团队空间左边。 */
 .team-page .account-header {
   min-height: 64px;
