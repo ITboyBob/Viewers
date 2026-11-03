@@ -1,11 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { PersonIcon, ExitIcon } from '@radix-ui/react-icons';
-import type { BusinessUserSummary } from '@ohif/core';
+import type { BusinessTeamMembership, BusinessUserSummary } from '@ohif/core';
 import TeamListOverlay from './TeamListOverlay';
 
-/** 个人信息面板及占位团队子菜单；不查询或切换真实团队，不执行注销。 */
-export default function MemberOverlay({ user }: { user: BusinessUserSummary }) {
+/** 个人信息面板；可展示会话自有团队，但不查询、切换团队或执行注销。 */
+export default function MemberOverlay({
+  user,
+  ownedTeam,
+}: {
+  user: BusinessUserSummary;
+  ownedTeam?: BusinessTeamMembership;
+}) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -94,6 +100,7 @@ export default function MemberOverlay({ user }: { user: BusinessUserSummary }) {
             aria-label="个人菜单"
           >
             <TeamListOverlay
+              ownedTeam={ownedTeam}
               contentRef={teamRef}
               suppressCloseFocusRef={closedByPointerOutsideRef}
             />

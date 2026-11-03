@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { ChevronRightIcon, HomeIcon } from '@radix-ui/react-icons';
+import { CheckIcon, ChevronRightIcon, HomeIcon } from '@radix-ui/react-icons';
+import type { BusinessTeamMembership } from '@ohif/core';
 
 // 本地展示数据，不代表会话中的真实团队，也不参与任务归属或团队切换。
 const placeholderTeams = ['团队 A', '团队 B'];
@@ -8,7 +9,9 @@ const placeholderTeams = ['团队 A', '团队 B'];
 export default function TeamListOverlay({
   contentRef,
   suppressCloseFocusRef,
+  ownedTeam,
 }: {
+  ownedTeam?: BusinessTeamMembership;
   contentRef: React.RefObject<HTMLDivElement>;
   suppressCloseFocusRef: React.RefObject<boolean>;
 }) {
@@ -55,7 +58,7 @@ export default function TeamListOverlay({
         <Popover.Content
           ref={contentRef}
           role="menu"
-          aria-label="团队列表（占位）"
+          aria-label={ownedTeam ? '团队列表' : '团队列表（占位）'}
           className="business-team-panel shadow-md"
           side={compact ? 'bottom' : 'right'}
           align="start"
@@ -81,12 +84,33 @@ export default function TeamListOverlay({
           }}
         >
           <div className="business-team-heading">你的团队</div>
-          <p className="business-team-hint">示例团队，仅供界面预览</p>
+          {ownedTeam && (
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked="true"
+              aria-disabled="true"
+              disabled
+              className="business-team-current"
+            >
+              <HomeIcon aria-hidden="true" />
+              <span className="business-team-name">{ownedTeam.name}</span>
+              <CheckIcon
+                className="business-team-check"
+                role="img"
+                aria-label="当前团队"
+              />
+            </button>
+          )}
+          <p className="business-team-hint">
+            {ownedTeam ? '示例团队，仅展示，不可切换' : '示例团队，仅供界面预览'}
+          </p>
           {placeholderTeams.map(name => (
             <button
               key={name}
               type="button"
-              role="menuitem"
+              role={ownedTeam ? 'menuitemradio' : 'menuitem'}
+              aria-checked={ownedTeam ? false : undefined}
               disabled
               aria-disabled="true"
               className="business-team-placeholder"

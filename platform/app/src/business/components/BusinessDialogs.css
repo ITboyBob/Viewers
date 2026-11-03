@@ -116,6 +116,7 @@
   font-size: 12px;
   line-height: 20px;
 }
+.business-team-current,
 .business-team-placeholder {
   display: flex;
   align-items: center;
@@ -130,6 +131,22 @@
   font: inherit;
   text-align: left;
   cursor: default;
+}
+.business-team-current {
+  color: var(--account-text, #fafafa);
+  background: #358cfd33;
+}
+.business-team-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.business-team-current > svg,
+.business-team-placeholder > svg {
+  flex-shrink: 0;
+}
+.business-team-check {
+  margin-left: auto;
+  color: var(--account-primary, #358cfd);
 }
 .business-dialog-backdrop {
   position: fixed;

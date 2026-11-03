@@ -196,3 +196,60 @@ test('外部指针关闭不抢回焦点，外部输入框保持可输入', async
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(document.activeElement).toBe(input);
 });
+
+test('传入自有团队时首行使用真实团队名并勾选，其他示例不可切换', async () => {
+  const ownedTeam = {
+    team_id: 'owned-team',
+    name: '真实团队名称',
+    owner_uid: user.uid,
+    role: 'owner' as const,
+  };
+  const oldFetch = globalThis.fetch;
+  const network = jest.fn(() => {
+    throw new Error('禁止网络');
+  });
+  const navigation = jest.fn();
+  globalThis.fetch = network;
+  try {
+    render(h('div', { onClick: navigation }, h(MemberOverlay, { user, ownedTeam })));
+    await openMember();
+    fireEvent.click(teamTrigger());
+    const menu = screen.getByRole('menu', { name: '团队列表' });
+    const rows = within(menu).getAllByRole('menuitemradio');
+    expect(rows[0].textContent).toContain(ownedTeam.name);
+    expect(rows[0].getAttribute('aria-checked')).toBe('true');
+    expect(within(rows[0]).getByLabelText('当前团队')).toBeTruthy();
+    for (const row of rows) {
+      expect((row as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(row);
+    }
+    expect(rows.slice(1).every(row => row.getAttribute('aria-checked') === 'false')).toBe(true);
+    expect(within(menu).getByText('示例团队，仅展示，不可切换')).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: '退出登录' }));
+    expect(network).not.toHaveBeenCalled();
+    expect(navigation).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '个人信息' })).toBeTruthy();
+    fireEvent.click(teamTrigger());
+    expect(screen.queryByRole('menu', { name: '团队列表' })).toBeNull();
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test('真实团队下拉仍支持左右键、Escape 分级关闭及焦点返回', async () => {
+  const ownedTeam = { team_id: 't', name: '自有团队', owner_uid: user.uid, role: 'owner' as const };
+  render(h(MemberOverlay, { user, ownedTeam }));
+  await openMember();
+  teamTrigger().focus();
+  fireEvent.keyDown(teamTrigger(), { key: 'ArrowRight' });
+  fireEvent.keyDown(screen.getByRole('menu', { name: '团队列表' }), { key: 'ArrowLeft' });
+  await waitFor(() => expect(document.activeElement).toBe(teamTrigger()));
+  fireEvent.keyDown(teamTrigger(), { key: 'ArrowRight' });
+  fireEvent.keyDown(screen.getByRole('menu', { name: '团队列表' }), { key: 'Escape' });
+  await waitFor(() => expect(document.activeElement).toBe(teamTrigger()));
+  expect(screen.getByRole('dialog', { name: '个人信息' })).toBeTruthy();
+  fireEvent.keyDown(teamTrigger(), { key: 'Escape' });
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '成员' }))
+  );
+});

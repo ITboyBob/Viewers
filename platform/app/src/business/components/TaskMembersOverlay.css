@@ -1,0 +1,75 @@
+.task-members-panel {
+  z-index: 50;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid #252a74;
+  border-radius: 8px;
+  background: var(--account-card, #090c2a);
+  color: var(--account-text, #fafafa);
+  box-shadow: 0 4px 12px #0006;
+  font:
+    400 14px/22px 'Noto Sans SC',
+    sans-serif;
+}
+.task-members-panel * {
+  box-sizing: border-box;
+}
+.task-members-heading {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+}
+.task-members-hint,
+.task-members-status,
+.task-members-error {
+  margin: 8px 0;
+  color: var(--account-muted, #7db3cf);
+}
+.task-members-hint {
+  font-size: 12px;
+}
+.task-members-error {
+  color: #ff9393;
+}
+.task-members-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-members-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 0;
+}
+.task-members-username {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.task-members-owner {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--account-primary, #358cfd);
+  border-radius: 4px;
+  color: var(--account-muted, #7db3cf);
+  font-size: 12px;
+}
+.task-members-retry {
+  border: 1px solid var(--account-primary, #358cfd);
+  border-radius: 4px;
+  padding: 4px 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.task-members-retry:focus-visible {
+  outline: 2px solid var(--account-primary, #358cfd);
+  outline-offset: 2px;
+}
