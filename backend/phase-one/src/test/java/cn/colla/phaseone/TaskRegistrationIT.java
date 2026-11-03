@@ -151,9 +151,13 @@ class TaskRegistrationIT {
         http.perform(request(team, token, UUID.randomUUID().toString(), "{\"title\":\"合成影像.dcm\"}")).andExpect(status().isInternalServerError());
         assertThat(count("task_record")).isEqualTo(1); assertThat(count("task_registration")).isEqualTo(1);
     }
-    @Test void noTaskReadOrGeneralWriteEndpointIsPublished() throws Exception {
+    @Test void mockTaskListDoesNotPublishRealTaskReadOrGeneralWrite() throws Exception {
         var data = create(UUID.randomUUID().toString(), 201); String path = "/api/v1/teams/" + team + "/tasks";
-        http.perform(get(path).header("Authorization", "Bearer " + token)).andExpect(status().isMethodNotAllowed());
+        // 团队页本期新增隔离演示列表；真实登记任务仍不通过该列表或详情读取开放。
+        var listed = http.perform(get(path).header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.mock").value(true)).andReturn();
+        var items = json.readTree(listed.getResponse().getContentAsString()).path("data").path("items");
+        for (var item : items) assertThat(item.path("task_id").asText()).isNotEqualTo(data.path("task_id").asText());
         http.perform(get(path + "/" + data.path("task_id").asText()).header("Authorization", "Bearer " + token)).andExpect(status().isNotFound());
         http.perform(patch(path + "/" + data.path("task_id").asText()).header("Authorization", "Bearer " + token).contentType("application/json").content("{}")).andExpect(status().isNotFound());
     }
