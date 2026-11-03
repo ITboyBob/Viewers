@@ -221,7 +221,7 @@ export function createBusinessServices(
       },
     };
     services.ui = {
-      renderHeader: ({ page }) => React.createElement(BusinessTopBar, { page, services }),
+      renderHeader: options => React.createElement(BusinessTopBar, { ...options, services }),
     };
   }
   return services;

@@ -82,7 +82,9 @@ async function login(page: Page, request: APIRequestContext, prefix: string) {
   await page.getByLabel('用户名').fill(username);
   await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(page).toHaveURL(/\/local-mask$/);
+  await expect(page).toHaveURL(/\/team\/tasks$/);
+  await page.goto('/local-mask');
+  await expect(page.getByRole('button', { name: 'Load files', exact: true })).toBeVisible();
   await page.addLocatorHandler(
     page.getByRole('button', { name: 'Confirm and hide', exact: true }),
     locator => locator.click()
@@ -565,10 +567,12 @@ test('旧MPR脚本原断言在受控Chrome、真实登录和本次合成数据�
       assert.equal((await page.request.post('http://localhost:3336/api/v1/users',{data:{username,password}})).status(),201);
       await page.goto('http://localhost:3336/account/login');
       await page.getByLabel('用户名').fill(username);await page.getByLabel('密码',{exact:true}).fill(password);
-      await page.getByRole('button',{name:'登录',exact:true}).click();await expect(page).toHaveURL(/local-mask$/);`;
+      await page.getByRole('button',{name:'登录',exact:true}).click();await expect(page).toHaveURL(new RegExp('team/tasks$'));
+      await page.goto('http://localhost:3336/local-mask');
+      await expect(page.getByRole('button',{name:'Load files',exact:true})).toBeVisible();`;
     original = original
       .replace("channel: 'msedge'", "channel: 'chrome'")
-      .replace(entry, loginCode)
+      .replace(entry, () => loginCode)
       .replace(
         "const output = path.resolve(__dirname, '../.cache/mask-ui');",
         `const output = ${JSON.stringify(testInfo.outputPath('mpr-原脚本'))};`
@@ -579,6 +583,7 @@ test('旧MPR脚本原断言在受控Chrome、真实登录和本次合成数据�
         `path.resolve(${JSON.stringify(fixture)}, file)`
       )
       .replaceAll('__dirname', JSON.stringify(scripts));
+    expect(original.match(/const files = fs/g)).toHaveLength(1);
     // 保留原脚本全部工具／像素／预览断言，仅适配浏览器、地址、登录、输入与输出目录。
     const result = await execute(process.execPath, ['-e', original], {
       cwd: process.cwd(),

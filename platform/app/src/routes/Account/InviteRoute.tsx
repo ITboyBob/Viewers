@@ -90,7 +90,7 @@ function InvitationForm({ services }: { services: BusinessServices }) {
     try {
       await api.send(teamId, value, controller.signal);
       if (!controller.signal.aborted) {
-        navigate('/local-mask');
+        navigate('/team/tasks');
       }
     } catch (failure) {
       if (!controller.signal.aborted) {
@@ -151,7 +151,7 @@ function InvitationForm({ services }: { services: BusinessServices }) {
           disabled={pending}
           onClick={() => {
             if (!busy.current) {
-              navigate('/local-mask');
+              navigate('/team/tasks');
             }
           }}
         >

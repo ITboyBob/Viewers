@@ -18,7 +18,9 @@ test('G1/G2：真实登记、原生IDB事务与BC两阶段参与、配色及失�
   await page.getByLabel('用户名').fill(username);
   await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(page).toHaveURL(/\/local-mask$/);
+  await expect(page).toHaveURL(/\/team\/tasks$/);
+  await page.goto('/local-mask');
+  await expect(page.getByRole('button', { name: 'Load files', exact: true })).toBeVisible();
   await page.addLocatorHandler(
     page.getByRole('button', { name: 'Confirm and hide', exact: true }),
     locator => locator.click()
@@ -188,7 +190,9 @@ test('G1/G2：真实登记、原生IDB事务与BC两阶段参与、配色及失�
   await viewer.getByLabel('用户名').fill(viewerName);
   await viewer.getByLabel('密码', { exact: true }).fill(password);
   await viewer.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(viewer).toHaveURL(/\/local-mask$/);
+  await expect(viewer).toHaveURL(/\/team\/tasks$/);
+  await viewer.goto('/local-mask');
+  await expect(viewer.getByRole('button', { name: 'Load files', exact: true })).toBeVisible();
   const viewerWrites: string[] = [];
   viewer.on('request', req => {
     if (/\/tasks(?:\/|$)/.test(new URL(req.url()).pathname)) {

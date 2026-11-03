@@ -44,7 +44,7 @@ export default function AccountForm({ mode }: { mode: 'login' | 'register' }) {
         if (sharedTaskId) {
           navigate(sharedViewPath(sharedTaskId), { replace: true });
         } else {
-          navigate(register ? '/account/invite' : '/local-mask');
+          navigate(register ? '/account/invite' : '/team/tasks');
         }
       }
     } catch (failure) {

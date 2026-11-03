@@ -53,7 +53,7 @@ function mount(path: string, basename = '/') {
           path: '/account/invite',
           element: h(BusinessAuthGate, { enabled: true }, h(InviteRoute)),
         }),
-        h(Route, { path: '/local-mask', element: h('p', null, '导入目标') }),
+        h(Route, { path: '/team/tasks', element: h('p', null, '团队目标') }),
         h(Route, {
           path: '/local-shared',
           element: h(BusinessAuthGate, { enabled: true }, h('p', null, '共享目标')),
@@ -112,12 +112,12 @@ test('原注册入口可达，注册成功到受保护真实邀请页，不伪�
   expect(screen.queryByText(/已加入/)).toBeNull();
 });
 
-test('成功登录固定去导入，basename内相对导航，不接受任意returnUrl', async () => {
+test('成功登录固定去团队任务，basename内相对导航，不接受任意returnUrl', async () => {
   mount('/account/login?returnUrl=https://outside.test', '/viewer-base');
   fill();
   fireEvent.click(screen.getByRole('button', { name: '登录' }));
-  expect(await screen.findByText('导入目标')).toBeTruthy();
-  expect(screen.getByTestId('route').textContent).toBe('/local-mask');
+  expect(await screen.findByText('团队目标')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe('/team/tasks');
 });
 
 test('提交中拒绝双击，失败留页，统一错误不泄露账号是否存在', async () => {
@@ -165,7 +165,7 @@ test('网络错误允许用户重试，缺失容器不伪造登录', async () =>
   fireEvent.click(screen.getByRole('button', { name: '登录' }));
   await screen.findByRole('alert');
   fireEvent.click(screen.getByRole('button', { name: '登录' }));
-  expect(await screen.findByText('导入目标')).toBeTruthy();
+  expect(await screen.findByText('团队目标')).toBeTruthy();
   cleanup();
   mockServices = undefined;
   mount('/account/login');
@@ -234,8 +234,8 @@ test.each([
   expect(screen.getByRole('link', { name: '注册' }).getAttribute('href')).toBe('/account/register');
   fill();
   fireEvent.click(screen.getByRole('button', { name: '登录', exact: true }));
-  expect(await screen.findByText('导入目标')).toBeTruthy();
-  expect(screen.getByTestId('route').textContent).toBe('/local-mask');
+  expect(await screen.findByText('团队目标')).toBeTruthy();
+  expect(screen.getByTestId('route').textContent).toBe('/team/tasks');
 });
 
 test.each([

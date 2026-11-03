@@ -178,6 +178,8 @@ test('mask范围与原生Local、远端模式及microscopy标记边界精确', (
     '/local-mask',
     '/local-mask/',
     '/account/invite',
+    '/team/tasks',
+    '/team/recent',
     '/segmentation/dicomlocal',
   ]) {
     expect(requiresBusinessAuth(path, undefined)).toBe(true);

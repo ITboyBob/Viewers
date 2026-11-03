@@ -162,3 +162,18 @@ test('viewer 关闭业务开关保留原 Header，标记不绕过开关', () => 
   expect(screen.getByText('OHIF原品牌')).toBeTruthy();
   expect(mockHeader).not.toHaveBeenCalled();
 });
+
+test.each([
+  ['/segmentation/dicomlocal', true],
+  ['/segmentation', true],
+  ['/microscopy', false],
+] as const)('头部 %s 仅向常规范围传递任务成员标记', (path, expected) => {
+  mount(
+    h(ViewerHeader, {
+      appConfig: { phaseOneBusiness: { enabled: true }, showPatientInfo: 'disabled' },
+    }),
+    path,
+    path === '/microscopy' ? { phaseOneMask: true } : undefined
+  );
+  expect(mockHeader).toHaveBeenCalledWith({ page: 'viewer', taskMembers: expected });
+});

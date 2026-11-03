@@ -100,14 +100,16 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
     const invitationResponse = await sent;
     expect(invitationResponse.status()).toBe(201);
     const invitation: InvitationView = (await invitationResponse.json()).data;
-    await expect(page).toHaveURL(/\/local-mask$/);
+    await expect(page).toHaveURL(/\/team\/tasks$/);
+    await page.goto('/local-mask');
     expect((await members()).some(item => item.uid === recipient.user.uid)).toBe(false);
 
     await receiverPage.goto('/account/login');
     expect(await receiverPage.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
     await credentials(receiverPage, recipientName);
     await receiverPage.getByRole('button', { name: '登录', exact: true }).click();
-    await expect(receiverPage).toHaveURL(/\/local-mask$/);
+    await expect(receiverPage).toHaveURL(/\/team\/tasks$/);
+    await receiverPage.goto('/local-mask');
     const recipientSession = await identity(receiverPage);
     expect(recipientSession.user.uid).toBe(recipient.user.uid);
     expect(recipientSession.token === owner.token).toBe(false);
@@ -316,7 +318,7 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
     expect(await sameOwnerPage.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
     await credentials(sameOwnerPage, ownerName);
     await sameOwnerPage.getByRole('button', { name: '登录', exact: true }).click();
-    await expect(sameOwnerPage).toHaveURL(/\/local-mask$/);
+    await expect(sameOwnerPage).toHaveURL(/\/team\/tasks$/);
     const secondOwner = await identity(sameOwnerPage);
     expect(secondOwner.user.uid).toBe(owner.user.uid);
     expect(secondOwner.default_team_id).toBe(owner.default_team_id);

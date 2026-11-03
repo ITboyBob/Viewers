@@ -179,3 +179,57 @@ test.each(['rejected', 'unavailable'])(
     expect(screen.queryByRole('alert')).toBeNull();
   }
 );
+
+test('只有显式常规任务上下文的已登记工作台使用任务成员，且绑定 runtime 的 id', async () => {
+  const container = services();
+  container.projectRuntime = {
+    getCurrent: () => ({
+      phase: 'registered',
+      mode_path: 'segmentation/dicomlocal',
+      task_id: sharedTask,
+    }),
+  } as BusinessServices['projectRuntime'];
+  const listTaskMembers = jest.fn().mockResolvedValue({
+    task_id: sharedTask,
+    owner_uid: 'owner',
+    members: [{ uid: 'owner', username: '示例 Owner' }],
+    mock: true,
+  });
+  container.teamPage = { listTaskMembers } as unknown as BusinessServices['teamPage'];
+  render(h(BusinessTopBar, { page: 'viewer', services: container, taskMembers: true }));
+  expect(screen.queryByRole('button', { name: '成员', exact: true })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '任务成员' }));
+  expect(await screen.findByText('示例 Owner')).toBeTruthy();
+  expect(listTaskMembers).toHaveBeenCalledWith(sharedTask, expect.any(AbortSignal));
+});
+
+test.each([
+  ['import', true, 'segmentation/dicomlocal', 'registered', sharedTask],
+  ['viewer', false, 'segmentation/dicomlocal', 'registered', sharedTask],
+  ['viewer', true, 'microscopy', 'registered', sharedTask],
+  ['viewer', true, 'segmentation/dicomlocal', 'ready', undefined],
+  ['viewer', true, 'segmentation/dicomlocal', 'registered', undefined],
+] as const)(
+  '非目标矩阵 %s %s %s %s 不读取任务名单',
+  (page, taskMembers, mode_path, phase, task_id) => {
+    const container = services();
+    container.projectRuntime = {
+      getCurrent: () => ({ mode_path, phase, task_id }),
+    } as BusinessServices['projectRuntime'];
+    const listTaskMembers = jest.fn();
+    container.teamPage = { listTaskMembers } as unknown as BusinessServices['teamPage'];
+    render(h(BusinessTopBar, { page, services: container, taskMembers }));
+    expect(screen.getByRole('button', { name: '成员', exact: true })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '任务成员' })).toBeNull();
+    expect(listTaskMembers).not.toHaveBeenCalled();
+  }
+);
+
+test('服务 UI 工厂转发精确工作台标记，旧 page-only 调用不变', () => {
+  const container = createBusinessServices({ enabled: true }, { storage: null });
+  const node = container.ui!.renderHeader({
+    page: 'viewer',
+    taskMembers: true,
+  }) as React.ReactElement;
+  expect(node.props.taskMembers).toBe(true);
+});

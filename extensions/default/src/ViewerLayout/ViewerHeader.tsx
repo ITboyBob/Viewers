@@ -100,7 +100,12 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
       {...(maskViewer && businessServices?.ui
         ? {
             Branding: null,
-            LeftActions: businessServices.ui.renderHeader({ page: 'viewer' }),
+            LeftActions: businessServices.ui.renderHeader({
+              page: 'viewer',
+              taskMembers:
+                pathname === '/segmentation/dicomlocal' ||
+                (pathname === '/segmentation' && source === 'dicomlocal'),
+            }),
           }
         : {})}
       onClickReturnButton={onClickReturnButton}

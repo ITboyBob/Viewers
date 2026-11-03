@@ -65,7 +65,8 @@ async function enter(page: Page, request: APIRequestContext): Promise<BusinessTa
   await page.getByLabel('用户名').fill(username);
   await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(page).toHaveURL(/\/local-mask$/);
+  await expect(page).toHaveURL(/\/team\/tasks$/);
+  await page.goto('/local-mask');
   await page.addLocatorHandler(
     page.getByRole('button', { name: 'Confirm and hide', exact: true }),
     locator => locator.click()

@@ -15,6 +15,8 @@ export function requiresBusinessAuth(
     path === '/local-mask' ||
     path === '/local-shared' ||
     path === '/account/invite' ||
+    path === '/team/tasks' ||
+    path === '/team/recent' ||
     path === '/segmentation/dicomlocal'
   ) {
     return true;

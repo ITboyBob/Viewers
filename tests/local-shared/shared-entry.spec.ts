@@ -21,7 +21,9 @@ async function login(page: Page, username: string) {
   await page.goto('/account/login');
   await credentials(page, username);
   await page.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(page).toHaveURL(/\/local-mask$/);
+  await expect(page).toHaveURL(/\/team\/tasks$/);
+  await page.goto('/local-mask');
+  await expect(page.getByRole('button', { name: 'Load files', exact: true })).toBeVisible();
 }
 async function ready(page: Page) {
   await page.addLocatorHandler(
@@ -59,14 +61,22 @@ test.describe('共享入口完整用户旅程', () => {
             ? { username: `share-register-${randomUUID().slice(0, 8)}` }
             : await createAccount(request, 'copy-viewer');
         const taskRequests: string[] = [];
+        const taskWrites: string[] = [];
+        // 普通登录允许团队看板 GET；整个旅程仍禁止 B 的任何 Task 写入。
         windows.b.on('request', req => {
-          if (/\/tasks(?:\/|$)/.test(new URL(req.url()).pathname)) {
-            taskRequests.push(req.method());
+          if (req.method() !== 'GET' && /\/tasks(?:\/|$)/.test(new URL(req.url()).pathname)) {
+            taskWrites.push(req.method());
           }
         });
         if (mode === 'authenticated') {
           await login(windows.b, b.username);
         }
+        // 从进入共享目标开始，继续保留原“零 Task 请求”断言，不掩盖共享回归。
+        windows.b.on('request', req => {
+          if (/\/tasks(?:\/|$)/.test(new URL(req.url()).pathname)) {
+            taskRequests.push(req.method());
+          }
+        });
         await windows.b.goto(address);
         if (mode !== 'authenticated') {
           await expect(windows.b).toHaveURL(
@@ -109,6 +119,7 @@ test.describe('共享入口完整用户旅程', () => {
         });
         expect(creates).toBe(1);
         expect(taskRequests).toEqual([]);
+        expect(taskWrites).toEqual([]);
         await expect(windows.a).toHaveURL(/\/segmentation\/dicomlocal\?/);
       } finally {
         await windows.close();

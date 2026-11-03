@@ -47,7 +47,7 @@ test('真实API公开注册、owner关联、当前身份与幂等注销，无凭
   ).toBe(401);
 });
 
-test('真实注册到受保护邀请页，刷新确认；真实登录到导入，注销后拒绝旧凭据', async ({
+test('真实注册到受保护邀请页，刷新确认；真实登录到团队任务，注销后拒绝旧凭据', async ({
   page,
   request,
 }) => {
@@ -68,13 +68,13 @@ test('真实注册到受保护邀请页，刷新确认；真实登录到导入�
   await page.goto('/account/login?returnUrl=https://outside.test');
   await fill(page, name);
   await page.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(page).toHaveURL(/\/local-mask$/);
-  await expect(page.getByText('Load files', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/team\/tasks$/);
+  await expect(page.getByRole('heading', { name: '团队任务', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByText('Load files', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '团队任务', exact: true })).toBeVisible();
   await page.goBack();
   await page.goForward();
-  await expect(page.getByText('Load files', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '团队任务', exact: true })).toBeVisible();
   const token = await storedToken(page);
   expect(
     (
@@ -133,7 +133,8 @@ test('独立浏览器上下文共享同实例账号团队但不共享标签页To
     ).toBe(true);
     await fill(pageB, name);
     await pageB.getByRole('button', { name: '登录', exact: true }).click();
-    await expect(pageB.getByText('Load files', { exact: true })).toBeVisible();
+    await expect(pageB).toHaveURL(/\/team\/tasks$/);
+    await expect(pageB.getByRole('heading', { name: '团队任务', exact: true })).toBeVisible();
     const tokenB = await storedToken(pageB);
     expect(tokenA === tokenB).toBe(false);
     const current = async (token: string, uid?: string) =>

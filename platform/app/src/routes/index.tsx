@@ -10,6 +10,7 @@ import LocalShared from './LocalShared/LocalShared';
 import Login from './Account/Login';
 import Register from './Account/Register';
 import InviteRoute from './Account/InviteRoute';
+import TeamPageRoute from './Team/TeamPageRoute';
 import ProjectRouteBoundary from '../business/ProjectRouteBoundary';
 import BusinessAuthGate, { requiresBusinessAuth } from '../business/BusinessAuthGate';
 import Debug from './Debug';
@@ -157,6 +158,8 @@ const createRoutes = ({
         { path: '/account/login', children: Login },
         { path: '/account/register', children: Register },
         { path: '/account/invite', children: InviteRoute },
+        { path: '/team/tasks', children: TeamPageRoute, props: { view: 'team' } },
+        { path: '/team/recent', children: TeamPageRoute, props: { view: 'recent' } },
         {
           path: '/local-shared',
           private: true,

@@ -30,8 +30,8 @@ function tree() {
       null,
       h(Route, { path: '/account/invite', element: h(InviteRoute) }),
       h(Route, {
-        path: '/local-mask',
-        element: h(BusinessAuthGate, { enabled: true }, h('p', null, '导入目标')),
+        path: '/team/tasks',
+        element: h(BusinessAuthGate, { enabled: true }, h('p', null, '团队目标')),
       }),
       h(Route, { path: '/account/login', element: h('p', null, '重新登录') })
     )
@@ -99,7 +99,7 @@ test('成员清单失败必须显错且阻止发送，不伪装已排除成员',
   enter('Bob');
   complete();
   expect(send).not.toHaveBeenCalled();
-  expect(screen.queryByText('导入目标')).toBeNull();
+  expect(screen.queryByText('团队目标')).toBeNull();
 });
 
 test('列表未加载完成前不能发出，加载后可以', async () => {
@@ -118,7 +118,7 @@ test('列表未加载完成前不能发出，加载后可以', async () => {
     done!([]);
   });
   complete();
-  await screen.findByText('导入目标');
+  await screen.findByText('团队目标');
   expect(send).toHaveBeenCalledTimes(1);
 });
 
@@ -141,7 +141,7 @@ test('仅使用会话当前团队，发送成功才经守卫进入导入，pendi
   expect(send).toHaveBeenCalledWith('current', 'Bob', expect.any(AbortSignal));
   expect(validate).not.toHaveBeenCalled();
   done!({ invitation_id: 'i' });
-  await screen.findByText('导入目标');
+  await screen.findByText('团队目标');
   expect(validate).toHaveBeenCalledTimes(1);
 });
 
@@ -155,7 +155,7 @@ test('真实发送失败留页并可重试，无成功或已入队假文案', as
   expect(validate).not.toHaveBeenCalled();
   expect(screen.queryByText(/已加入/)).toBeNull();
   complete();
-  await screen.findByText('导入目标');
+  await screen.findByText('团队目标');
   expect(send).toHaveBeenCalledTimes(2);
 });
 

@@ -128,7 +128,7 @@ export interface BusinessServices {
   teamInvitations?: TeamInvitationApi;
   collaborationMock?: { forUser(user: BusinessUserSummary): CollaborationMockApi };
   localCollaboration?: LocalCollaborationServices;
-  ui?: { renderHeader(options: { page: 'import' | 'viewer' }): ReactNode };
+  ui?: { renderHeader(options: { page: 'import' | 'viewer'; taskMembers?: boolean }): ReactNode };
 }
 
 /** 本地影像及project仅保存在当前页面内存，不进入业务请求或浏览器存储。 */

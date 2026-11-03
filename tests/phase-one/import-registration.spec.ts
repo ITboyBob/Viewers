@@ -14,7 +14,8 @@ async function login(page: Page, request: APIRequestContext) {
   await page.getByLabel('用户名').fill(username);
   await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(page).toHaveURL(/\/local-mask$/);
+  await expect(page).toHaveURL(/\/team\/tasks$/);
+  await page.goto('/local-mask');
   await expect(page.getByRole('button', { name: 'Load files', exact: true })).toBeVisible();
 }
 const taskPath = (url: string) => /^\/api\/v1\/teams\/[^/]+\/tasks$/.test(new URL(url).pathname);
