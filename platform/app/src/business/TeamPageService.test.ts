@@ -136,3 +136,37 @@ test.each(['CANCELLED', 'NETWORK_ERROR', 'UNAUTHORIZED'])(
     await expect(service.listTaskMembers(task)).rejects.toBe(error);
   }
 );
+
+test('ISO UTC 保留微秒／纳秒精度，毫秒内真实时间优先于任务 id', async () => {
+  const items = [
+    { ...recent().items[0], task_id: otherTask, last_entered_at: '2026-11-01T08:00:00.123456789Z' },
+    { ...recent().items[0], last_entered_at: '2026-11-01T08:00:00.123456788Z' },
+  ];
+  const value = { items, total: 2, mock: true };
+  await expect(setup(value).service.listRecentTasks()).resolves.toEqual(value);
+  await expect(
+    setup({ ...value, items: [...items].reverse() }).service.listRecentTasks()
+  ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+});
+
+test('小数末尾零表示同一时刻时按任务 id 排序，仍拒绝无效日历日期', async () => {
+  const value = {
+    items: [
+      { ...recent().items[0], last_entered_at: '2026-11-01T08:00:00.1Z' },
+      {
+        ...recent().items[0],
+        task_id: otherTask,
+        last_entered_at: '2026-11-01T08:00:00.100000000Z',
+      },
+    ],
+    total: 2,
+    mock: true,
+  };
+  await expect(setup(value).service.listRecentTasks()).resolves.toEqual(value);
+  await expect(
+    setup({
+      ...recent(),
+      items: [{ ...recent().items[0], last_entered_at: '2026-02-30T08:00:00Z' }],
+    }).service.listRecentTasks()
+  ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+});

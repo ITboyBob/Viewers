@@ -22,12 +22,21 @@ const invalid = (): never => {
 const utc = (value: unknown): value is string => {
   if (
     typeof value !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)
   ) {
     return false;
   }
   const date = new Date(value);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 19) === value.slice(0, 19);
+};
+// ISO UTC 同一秒内按原始小数位比较，避免 Date.parse 截断到毫秒改变排序。
+const compareUtc = (left: string, right: string): number => {
+  const seconds = left.slice(0, 19).localeCompare(right.slice(0, 19));
+  if (seconds !== 0) return seconds;
+  const a = left.slice(19, -1).replace(/^\./, '');
+  const b = right.slice(19, -1).replace(/^\./, '');
+  const length = Math.max(a.length, b.length);
+  return a.padEnd(length, '0').localeCompare(b.padEnd(length, '0'));
 };
 const card = (value: unknown): value is TeamTaskCard =>
   record(value) &&
@@ -60,7 +69,7 @@ export class TeamPageService implements TeamPageApi {
     for (let index = 1; index < result.items.length; index++) {
       const before = result.items[index - 1];
       const after = result.items[index];
-      const delta = Date.parse(before.last_entered_at) - Date.parse(after.last_entered_at);
+      const delta = compareUtc(before.last_entered_at, after.last_entered_at);
       if (delta < 0 || (delta === 0 && before.task_id > after.task_id)) {
         invalid();
       }
