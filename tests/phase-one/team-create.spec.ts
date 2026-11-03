@@ -124,7 +124,36 @@ for (const view of ['team', 'recent'] as const) {
       phase: 'registered',
       current: owner.default_team_id,
     });
-    await page.screenshot({ path: testInfo.outputPath(`${view}-工作台.png`) });
+    await expect(page.getByRole('button', { name: '通知', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '邀请', exact: true })).toBeVisible();
+    const membersRead = page.waitForResponse(
+      response => new URL(response.url()).pathname === `/api/v1/tasks/${task.task_id}/members`
+    );
+    await page.getByRole('button', { name: '任务成员', exact: true }).click();
+    const membersResponse = await membersRead;
+    expect(membersResponse.status()).toBe(200);
+    const expectedMembers = {
+      task_id: task.task_id,
+      owner_uid: member.user.uid,
+      members: [{ uid: member.user.uid, username: member.user.username }],
+      mock: false,
+    };
+    expect((await membersResponse.json()).data).toEqual(expectedMembers);
+    // 团队 Owner 和其他查看者不会改变任务创建者，也不会被自动加入任务名单。
+    if (view === 'team') {
+      const ownerRead = await request.get(`/api/v1/tasks/${task.task_id}/members`, {
+        headers: { Authorization: `Bearer ${owner.token}` },
+      });
+      expect(ownerRead.status()).toBe(200);
+      expect((await ownerRead.json()).data).toEqual(expectedMembers);
+    }
+    const popup = page.getByRole('dialog', { name: '任务成员', exact: true });
+    await expect(popup.getByRole('listitem')).toHaveCount(1);
+    await expect(popup.getByText(member.user.username, { exact: true })).toBeVisible();
+    await expect(popup.getByText('Owner', { exact: true })).toHaveCount(1);
+    await expect(popup.getByText(/示例数据|示例用户甲|示例用户乙/)).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath(`${view}-真实创建者工作台.png`) });
+    await popup.screenshot({ path: testInfo.outputPath(`${view}-真实任务成员.png`) });
   });
 }
 

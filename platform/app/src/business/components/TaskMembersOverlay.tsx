@@ -171,7 +171,6 @@ export default function TaskMembersOverlay({ taskId, api, identityKey }: Props) 
           }}
         >
           <h2 className="task-members-heading">任务成员</h2>
-          <p className="task-members-hint">示例数据</p>
           {/* 换身份／任务先卸载旧读取器，避免新渲染短暂闪现旧名单。 */}
           <TaskMembersList
             key={JSON.stringify([identityKey, taskId])}

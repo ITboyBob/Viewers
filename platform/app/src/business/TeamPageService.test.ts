@@ -20,8 +20,8 @@ const recent = () => ({
 const members = () => ({
   task_id: task,
   owner_uid: uid,
-  members: [{ uid, username: '示例用户甲' }],
-  mock: true,
+  members: [{ uid, username: '真实创建者' }],
+  mock: false,
 });
 const setup = (value: unknown) => {
   const request = jest.fn().mockResolvedValue(value);
@@ -113,7 +113,7 @@ test.each([
 test.each([
   null,
   {},
-  { ...members(), mock: false },
+  { ...members(), mock: true },
   { ...members(), task_id: otherTask },
   { ...members(), owner_uid: otherTask },
   { ...members(), members: [] },

@@ -273,9 +273,14 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
       otherWrites,
       url: page.url(),
     };
-    await page.getByRole('button', { name: '通知', exact: true }).click();
-    await expect(page.getByRole('dialog', { name: '通知', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '关闭通知弹窗' }).click();
+    await expect(page.getByRole('button', { name: '通知', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '任务成员', exact: true }).click();
+    await expect(
+      page
+        .getByRole('dialog', { name: '任务成员', exact: true })
+        .getByText('Owner', { exact: true })
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '邀请', exact: true }).click();
     const mock = page.getByRole('dialog', { name: '邀请他人协作' });
     await mock

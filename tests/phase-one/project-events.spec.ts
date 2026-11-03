@@ -535,7 +535,7 @@ for (const status of [403, 404]) {
   });
 }
 
-test('A联合B：打开通知及发送合成协作邀请不触发项目时间', async ({ page, request }) => {
+test('A联合B：读取真实成员及发送合成协作邀请不触发项目时间', async ({ page, request }) => {
   await enter(page, request);
   let touches = 0;
   page.on('request', req => {
@@ -543,9 +543,12 @@ test('A联合B：打开通知及发送合成协作邀请不触发项目时间', 
       touches++;
     }
   });
-  await page.getByRole('button', { name: '通知', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: '通知', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '关闭通知弹窗' }).click();
+  await expect(page.getByRole('button', { name: '通知', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '任务成员', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: '任务成员', exact: true }).getByText('Owner', { exact: true })
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '邀请', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '邀请他人协作' });
   await expect(dialog).toBeVisible();

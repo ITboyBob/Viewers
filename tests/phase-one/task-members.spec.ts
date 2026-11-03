@@ -38,11 +38,12 @@ async function importTask(page: Page): Promise<BusinessTask> {
 const panel = (page: Page) => page.getByRole('dialog', { name: '任务成员', exact: true });
 const membersPath = (taskId: string) => `/api/v1/tasks/${taskId}/members`;
 
-test('真实导入的任务 id 绑定 mock 名单，只显示用户名与唯一现任 Owner', async ({
+test('真实导入的任务显示真实创建者与唯一 Owner，无示例名单和工作台通知', async ({
   page,
   request,
 }, testInfo) => {
-  await login(page, request);
+  const username = await login(page, request);
+  await expect(page.getByRole('button', { name: '通知', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '成员', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '任务成员', exact: true })).toHaveCount(0);
   const task = await importTask(page);
@@ -56,10 +57,12 @@ test('真实导入的任务 id 绑定 mock 名单，只显示用户名与唯一�
   expect(response.status()).toBe(200);
   const data: TaskMemberList = (await response.json()).data;
   expect(data.task_id).toBe(task.task_id);
-  expect(data.mock).toBe(true);
-  expect(data.owner_uid).not.toBe(task.assignee_uid);
+  expect(data.mock).toBe(false);
+  expect(data.owner_uid).toBe(task.assignee_uid);
+  expect(data.members).toEqual([{ uid: task.assignee_uid, username }]);
+  await expect(page.getByRole('button', { name: '通知', exact: true })).toHaveCount(0);
   const popup = panel(page);
-  await expect(popup.getByText('示例数据', { exact: true })).toBeVisible();
+  await expect(popup.getByText(/示例数据|示例用户甲|示例用户乙/)).toHaveCount(0);
   await expect(popup.getByRole('listitem')).toHaveCount(data.members.length);
   await expect(popup.getByText('Owner', { exact: true })).toHaveCount(1);
   for (const member of data.members) {

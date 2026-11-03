@@ -3,8 +3,10 @@ package cn.colla.phaseone.dashboard;
 import cn.colla.phaseone.dashboard.DashboardDtos.*;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import org.springframework.stereotype.Service;
 
+/** 列表保留演示投影；任务成员只来自已授权的真实任务。 */
 @Service
 public class DashboardMockService {
     private final DashboardTargetResolver targets;
@@ -36,19 +38,7 @@ public class DashboardMockService {
 
     public TaskMembers taskMembers(String uid, String taskId) {
         String canonical = DashboardTargetResolver.uuid(taskId);
-        var viewer = targets.viewer(uid);
-        var result = fixtures.forViewer(viewer).visibleTasks().get(canonical);
-        if (result == null) {
-            targets.requireVisibleRealTask(uid, canonical);
-            result = fixtures.members(viewer, canonical);
-        }
-        // 夹具不合法必须失败，不能伪装成无 Owner 或空名单的成功响应。
-        String ownerUid = result.owner_uid();
-        if (!canonical.equals(result.task_id()) || !result.mock()
-            || result.members().stream().filter(member -> member.uid().equals(ownerUid)).count() != 1
-            || result.members().stream().map(Member::uid).distinct().count() != result.members().size()) {
-            throw new IllegalStateException("任务成员演示模板不符合契约");
-        }
-        return result;
+        var owner = targets.requireVisibleRealTask(uid, canonical);
+        return new TaskMembers(canonical, owner.uid(), List.of(owner), false);
     }
 }

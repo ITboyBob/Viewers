@@ -23,14 +23,10 @@
   font-weight: 500;
   line-height: 24px;
 }
-.task-members-hint,
 .task-members-status,
 .task-members-error {
   margin: 8px 0;
   color: var(--account-muted, #7db3cf);
-}
-.task-members-hint {
-  font-size: 12px;
 }
 .task-members-error {
   color: #ff9393;

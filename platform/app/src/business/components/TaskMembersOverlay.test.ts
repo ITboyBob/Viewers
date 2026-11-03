@@ -8,14 +8,11 @@ const h = React.createElement;
 const taskId = '10000000-0000-4000-8000-000000000001';
 const otherTaskId = '10000000-0000-4000-8000-000000000002';
 const ownerUid = '20000000-0000-4000-8000-000000000001';
-const list = (target = taskId, username = '示例任务 Owner'): TaskMemberList => ({
+const list = (target = taskId, username = '真实创建者'): TaskMemberList => ({
   task_id: target,
   owner_uid: ownerUid,
-  mock: true,
-  members: [
-    { uid: '20000000-0000-4000-8000-000000000002', username: '非团队协作者' },
-    { uid: ownerUid, username },
-  ],
+  mock: false,
+  members: [{ uid: ownerUid, username }],
 });
 const makeApi = (): jest.Mocked<TeamPageApi> => ({
   listTeamTasks: jest.fn(),
@@ -41,19 +38,17 @@ const settle = async (action: () => void) =>
   });
 afterEach(cleanup);
 
-test('只在打开时按目标 taskId 读取，展示用户名与显式唯一 Owner 并明确示例数据', async () => {
+test('只在打开时按目标 taskId 读取，展示用户名与显式唯一 Owner 且无示例文案', async () => {
   const api = makeApi();
   render(h(TaskMembersOverlay, { taskId, api, identityKey: '当前用户' }));
   expect(api.listTaskMembers).not.toHaveBeenCalled();
   open();
   expect(api.listTaskMembers).toHaveBeenCalledWith(taskId, expect.any(AbortSignal));
-  await screen.findByText('示例任务 Owner');
-  expect(within(panel()).getByText('示例数据')).toBeTruthy();
+  await screen.findByText('真实创建者');
+  expect(within(panel()).queryByText('示例数据')).toBeNull();
+  expect(panel().textContent).not.toMatch(/示例用户甲|示例用户乙/);
   const members = within(panel()).getAllByRole('listitem');
-  expect(members.map(member => member.textContent)).toEqual([
-    '非团队协作者',
-    '示例任务 OwnerOwner',
-  ]);
+  expect(members.map(member => member.textContent)).toEqual(['真实创建者Owner']);
   expect(within(panel()).getAllByText('Owner', { exact: true })).toHaveLength(1);
   expect(within(panel()).queryByRole('img')).toBeNull();
   expect(within(panel()).queryByRole('button')).toBeNull();
@@ -78,7 +73,7 @@ test.each(['网络失败', '401', '404', '422', '500'])(
     expect(within(panel()).queryByRole('list')).toBeNull();
     expect(panel().textContent).not.toMatch(/暂无|没有成员/);
     fireEvent.click(within(panel()).getByRole('button', { name: '重试' }));
-    await screen.findByText('示例任务 Owner');
+    await screen.findByText('真实创建者');
     expect(screen.queryByRole('alert')).toBeNull();
     expect(api.listTaskMembers).toHaveBeenCalledTimes(2);
   }
@@ -90,13 +85,13 @@ test.each(['identityKey', 'taskId'])('%s 改变立即清除已展示名单并读
   const props = { taskId, api, identityKey: '用户一' };
   const { rerender } = render(h(TaskMembersOverlay, props));
   open();
-  await screen.findByText('示例任务 Owner');
+  await screen.findByText('真实创建者');
   const oldSignal = api.listTaskMembers.mock.calls[0][1];
   api.listTaskMembers.mockReturnValueOnce(next.promise);
   const nextProps = { ...props, [field]: field === 'taskId' ? otherTaskId : '用户二' };
   rerender(h(TaskMembersOverlay, nextProps));
   expect(oldSignal?.aborted).toBe(true);
-  expect(screen.queryByText('示例任务 Owner')).toBeNull();
+  expect(screen.queryByText('真实创建者')).toBeNull();
   expect(within(panel()).getByRole('status').textContent).toBe('正在读取成员…');
   expect(api.listTaskMembers).toHaveBeenLastCalledWith(nextProps.taskId, expect.any(AbortSignal));
   await settle(() => next.resolve(list(nextProps.taskId, '新上下文 Owner')));
@@ -129,10 +124,10 @@ test('身份变化后旧请求迟到失败不能覆盖新名单或展示错误',
   const { rerender } = render(h(TaskMembersOverlay, { taskId, api, identityKey: '用户一' }));
   open();
   rerender(h(TaskMembersOverlay, { taskId, api, identityKey: '用户二' }));
-  await screen.findByText('示例任务 Owner');
+  await screen.findByText('真实创建者');
   await settle(() => old.reject(new Error('旧错误')));
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.getByText('示例任务 Owner')).toBeTruthy();
+  expect(screen.getByText('真实创建者')).toBeTruthy();
 });
 
 test('关闭取消请求；重开重新读取且旧响应不能污染本次名单', async () => {
@@ -159,14 +154,14 @@ test('成功名单关闭后不缓存；隐藏时目标或身份改变不请求�
   const api = makeApi();
   const { rerender } = render(h(TaskMembersOverlay, { taskId, api, identityKey: '用户一' }));
   open();
-  await screen.findByText('示例任务 Owner');
+  await screen.findByText('真实创建者');
   fireEvent.keyDown(panel(), { key: 'Escape' });
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   rerender(h(TaskMembersOverlay, { taskId: otherTaskId, api, identityKey: '用户二' }));
   expect(api.listTaskMembers).toHaveBeenCalledTimes(1);
   api.listTaskMembers.mockReturnValueOnce(deferred().promise);
   open();
-  expect(screen.queryByText('示例任务 Owner')).toBeNull();
+  expect(screen.queryByText('真实创建者')).toBeNull();
   expect(api.listTaskMembers).toHaveBeenLastCalledWith(otherTaskId, expect.any(AbortSignal));
 });
 
@@ -190,7 +185,7 @@ test('Escape 关闭后焦点返回入口；重复点击入口可收起', async (
   render(h(TaskMembersOverlay, { taskId, api, identityKey: '用户' }));
   trigger().focus();
   open();
-  await screen.findByText('示例任务 Owner');
+  await screen.findByText('真实创建者');
   fireEvent.keyDown(panel(), { key: 'Escape' });
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   await waitFor(() => expect(document.activeElement).toBe(trigger()));
@@ -210,7 +205,7 @@ test('外部指针关闭后不抢走外部输入焦点', async () => {
     )
   );
   open();
-  await screen.findByText('示例任务 Owner');
+  await screen.findByText('真实创建者');
   fireEvent.pointerDown(panel());
   const input = screen.getByRole('textbox');
   fireEvent.pointerDown(input);
@@ -239,7 +234,7 @@ test('任务浮层隔离完整快捷键序列、点击、指针及文件投放',
       )
     );
     open();
-    await screen.findByText('示例任务 Owner');
+    await screen.findByText('真实创建者');
     fireEvent.click(panel());
     fireEvent.pointerDown(panel());
     fireEvent.keyDown(panel(), { key: 'i', code: 'KeyI', keyCode: 73 });
@@ -315,7 +310,7 @@ test.each(['成功', '失败'])(
       await settle(() =>
         result === '成功' ? pending.resolve(list()) : pending.reject(new Error('第二次失败'))
       );
-      if (result === '成功') await screen.findByText('示例任务 Owner');
+      if (result === '成功') await screen.findByText('真实创建者');
       else await screen.findByRole('alert');
       pressFromActiveElement();
       expect(shortcut).not.toHaveBeenCalled();

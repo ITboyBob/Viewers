@@ -3,7 +3,7 @@ package cn.colla.phaseone.dashboard;
 import java.time.Instant;
 import java.util.List;
 
-/** 阶段性演示读投影，不扩充真实任务或成员存储。 */
+/** 团队页演示列表与真实任务成员的只读投影，不扩充成员存储。 */
 public final class DashboardDtos {
     private DashboardDtos() {}
     public record TeamTaskCard(String task_id, String team_id, String title, String subtitle, String preview_key) {}

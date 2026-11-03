@@ -16,8 +16,8 @@ const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
-const invalid = (): never => {
-  throw new BusinessApiError(502, 'INVALID_RESPONSE', '团队页演示读取响应无效，请重试。');
+const invalid = (message = '团队页演示读取响应无效，请重试。'): never => {
+  throw new BusinessApiError(502, 'INVALID_RESPONSE', message);
 };
 const utc = (value: unknown): value is string => {
   if (
@@ -85,26 +85,26 @@ export class TeamPageService implements TeamPageApi {
     });
     if (
       !record(value) ||
-      value.mock !== true ||
+      value.mock !== false ||
       !uuid(value.task_id) ||
       value.task_id !== taskId ||
       !uuid(value.owner_uid) ||
       !Array.isArray(value.members)
     ) {
-      return invalid();
+      return invalid('任务成员读取响应无效，请重试。');
     }
     const ids = new Set<string>();
     const members: TaskMemberList['members'] = value.members.map(member => {
       if (!record(member) || !uuid(member.uid) || !text(member.username) || ids.has(member.uid)) {
-        return invalid();
+        return invalid('任务成员读取响应无效，请重试。');
       }
       ids.add(member.uid);
       return { uid: member.uid, username: member.username };
     });
     if (!ids.has(value.owner_uid)) {
-      return invalid();
+      return invalid('任务成员读取响应无效，请重试。');
     }
-    return { task_id: value.task_id, owner_uid: value.owner_uid, members, mock: true };
+    return { task_id: value.task_id, owner_uid: value.owner_uid, members, mock: false };
   }
 
   private list<T extends TeamTaskCard>(

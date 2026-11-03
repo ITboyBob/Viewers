@@ -5,10 +5,7 @@ import cn.colla.phaseone.dashboard.DashboardTargetResolver.Viewer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
 /** 可替换的纯演示提供器；非入队样本仅声明当前 uid 的可见关系，不写入团队或任务。 */
@@ -18,8 +15,7 @@ public class DashboardMockFixtures {
     private static final Instant LATEST = Instant.parse("2026-11-03T08:00:00Z");
     private static final Instant PREVIOUS = Instant.parse("2026-11-02T08:00:00Z");
 
-    public record Fixture(List<TeamTaskCard> teamTasks, List<RecentTaskCard> recentTasks,
-                          Map<String, TaskMembers> visibleTasks) {}
+    public record Fixture(List<TeamTaskCard> teamTasks, List<RecentTaskCard> recentTasks) {}
 
     public Fixture forViewer(Viewer viewer) {
         var ct = new TeamTaskCard(id(viewer.uid(), "team-ct"), viewer.ownedTeamId(), "腹部 CT 示例", "示例数据 · 团队任务", "abdominal-ct");
@@ -28,16 +24,7 @@ public class DashboardMockFixtures {
             "非入队协作示例", "示例数据 · 已访问工作台", "none");
         var team = List.of(ct, other);
         var recent = List.of(recent(external, LATEST), recent(ct, PREVIOUS), recent(other, PREVIOUS));
-        var visible = Stream.of(ct, other, external).collect(Collectors.toUnmodifiableMap(TeamTaskCard::task_id,
-            task -> members(viewer, task.task_id())));
-        return new Fixture(team, recent, visible);
-    }
-
-    /** Owner 是任务专属的显式示例用户甲，不来自团队 Owner、导入者或在线窗口。 */
-    public TaskMembers members(Viewer viewer, String taskId) {
-        String owner = id(taskId, "owner-template-user-a");
-        return new TaskMembers(taskId, owner, List.of(new Member(owner, "示例用户甲"),
-            new Member(viewer.uid(), viewer.username()), new Member(id(taskId, "collaborator-user-b"), "示例用户乙")), true);
+        return new Fixture(team, recent);
     }
 
     private RecentTaskCard recent(TeamTaskCard task, Instant entered) {

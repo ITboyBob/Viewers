@@ -65,12 +65,14 @@ export default function BusinessTopBar({
           user={user}
         />
       )}
-      <NotificationDialog
-        key={`notifications:${user.uid}`}
-        api={services.teamInvitations}
-        store={store}
-        user={user}
-      />
+      {page === 'import' && (
+        <NotificationDialog
+          key={`notifications:${user.uid}`}
+          api={services.teamInvitations}
+          store={store}
+          user={user}
+        />
+      )}
       {page === 'viewer' && (
         <CollaborationInviteDialog
           key={`invite:${user.uid}`}

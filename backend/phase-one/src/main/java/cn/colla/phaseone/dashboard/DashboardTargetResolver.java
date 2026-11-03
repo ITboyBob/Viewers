@@ -1,6 +1,7 @@
 package cn.colla.phaseone.dashboard;
 
 import cn.colla.phaseone.identity.IdentityRepository;
+import cn.colla.phaseone.dashboard.DashboardDtos.Member;
 import cn.colla.phaseone.shared.ApiException;
 import cn.colla.phaseone.team.TeamPolicy;
 import java.util.UUID;
@@ -41,11 +42,15 @@ public class DashboardTargetResolver {
         return viewer;
     }
 
-    public void requireVisibleRealTask(String uid, String taskId) {
-        // 不读取 assignee_uid，不对 touch、登记或真实协作授权产生副作用。
-        String teamId = jdbc.query("SELECT task_id,team_id FROM task_record WHERE task_id=?",
-            (row, index) -> row.getString("team_id"), taskId).stream().findFirst().orElseThrow(DashboardTargetResolver::notFound);
-        teams.requireMember(uid, teamId);
+    public Member requireVisibleRealTask(String uid, String taskId) {
+        // 创建者由服务端登记；只读查询不能使用查看者或团队所有者替代。
+        record Target(String teamId, Member owner) {}
+        var target = jdbc.query("SELECT t.team_id,t.assignee_uid,u.username FROM task_record t JOIN app_user u ON u.uid=t.assignee_uid WHERE t.task_id=?",
+            (row, index) -> new Target(row.getString("team_id"),
+                new Member(row.getString("assignee_uid"), row.getString("username"))), taskId)
+            .stream().findFirst().orElseThrow(DashboardTargetResolver::notFound);
+        teams.requireMember(uid, target.teamId());
+        return target.owner();
     }
 
     public static String uuid(String value) {

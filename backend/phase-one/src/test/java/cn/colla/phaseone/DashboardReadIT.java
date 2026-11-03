@@ -82,7 +82,7 @@ class DashboardReadIT {
             .andReturn().getResponse().getContentAsString());
         assertThat(envelope.size()).isEqualTo(1);
         assertThat(envelope.has("data")).isTrue();
-        assertThat(envelope.at("/data/mock").asBoolean()).isTrue();
+        assertThat(envelope.at("/data/mock").asBoolean()).isEqualTo(!path.endsWith("/members"));
         return envelope.path("data");
     }
     private List<JsonNode> items(JsonNode data) {
@@ -93,20 +93,17 @@ class DashboardReadIT {
         assertThat(rows).extracting(row -> row.path("task_id").asText()).doesNotHaveDuplicates();
         return rows;
     }
-    private void memberContract(JsonNode result, String task, Actor actor) {
+    private void memberContract(JsonNode result, String task, Actor creator) {
         assertThat(result.size()).isEqualTo(4);
         assertThat(result.path("task_id").asText()).isEqualTo(task);
-        String owner = result.path("owner_uid").asText();
-        assertThat(UUID.fromString(owner).toString()).isEqualTo(owner);
-        var members = new ArrayList<JsonNode>();
-        result.path("members").forEach(members::add);
-        assertThat(members.stream().filter(row -> row.path("uid").asText().equals(owner)).count()).isEqualTo(1);
-        assertThat(members).extracting(row -> row.path("uid").asText()).contains(actor.uid()).doesNotHaveDuplicates();
-        assertThat(owner).isNotEqualTo(actor.uid());
-        for (JsonNode member : members) {
-            assertThat(member.size()).isEqualTo(2);
-            assertThat(member.path("username").asText()).isNotBlank();
-        }
+        assertThat(result.path("mock").asBoolean()).isFalse();
+        assertThat(result.path("owner_uid").asText()).isEqualTo(creator.uid());
+        assertThat(result.path("members").size()).isEqualTo(1);
+        var owner = result.path("members").get(0);
+        assertThat(owner.size()).isEqualTo(2);
+        assertThat(owner.path("uid").asText()).isEqualTo(creator.uid());
+        assertThat(owner.path("username").asText()).isEqualTo(jdbc.queryForObject(
+            "SELECT username FROM app_user WHERE uid=?", String.class, creator.uid()));
     }
     private Map<String, String> database() throws Exception {
         // 按字节比较 JSON 列；失败报告只输出快照摘要，不泄露会话或账号字段。
@@ -161,14 +158,10 @@ class DashboardReadIT {
         assertThat(data(alice, "/api/v1/tasks/recent")).isEqualTo(result);
     }
 
-    @Test void explicitlyVisibleNonTeamMockTaskHasMembersWithoutJoiningAnyTeam() throws Exception {
-        var rows = items(data(alice, "/api/v1/tasks/recent"));
-        var external = rows.stream().filter(row -> !row.path("team_id").asText().equals(alice.team())).findFirst().orElseThrow();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM team_member WHERE uid=? AND team_id=?", Integer.class,
-            alice.uid(), external.path("team_id").asText())).isZero();
+    @Test void placeholderTasksNeverProduceMembers() throws Exception {
         var before = database();
-        String task = external.path("task_id").asText();
-        memberContract(data(alice, membersPath(task)), task, alice);
+        for (var row : items(data(alice, "/api/v1/tasks/recent")))
+            read(alice, membersPath(row.path("task_id").asText())).andExpect(status().isNotFound());
         assertThat(database()).isEqualTo(before);
     }
 
@@ -186,20 +179,18 @@ class DashboardReadIT {
         read(alice, teamPath(alice)).andExpect(status().isNotFound());
     }
 
-    @Test void twoAccountsCannotReadEachOthersPrivateFixturesOrOwners() throws Exception {
+    @Test void twoAccountsCannotReadEachOthersPrivateTasksOrOwners() throws Exception {
         var a = items(data(alice, teamPath(alice)));
         var b = items(data(bob, teamPath(bob)));
         assertThat(a).extracting(row -> row.path("task_id").asText())
             .doesNotContainAnyElementsOf(b.stream().map(row -> row.path("task_id").asText()).toList());
-        String task = a.getFirst().path("task_id").asText();
+        String task = importedTask(alice, alice.team());
         var own = data(alice, membersPath(task));
         memberContract(own, task, alice);
         assertThat(data(alice, membersPath(task))).isEqualTo(own);
         read(bob, membersPath(task)).andExpect(status().isNotFound());
-        for (var row : items(data(alice, "/api/v1/tasks/recent")))
-            read(bob, membersPath(row.path("task_id").asText())).andExpect(status().isNotFound());
-        String other = b.getFirst().path("task_id").asText();
-        assertThat(data(bob, membersPath(other)).path("owner_uid")).isNotEqualTo(own.path("owner_uid"));
+        String other = importedTask(bob, bob.team());
+        memberContract(data(bob, membersPath(other)), other, bob);
     }
 
     @ParameterizedTest @ValueSource(strings = {"not-a-uuid", "1-1-1-1-1", "00000000-0000-0000-0000-00000000000g"})
@@ -227,24 +218,30 @@ class DashboardReadIT {
         for (String path : paths) read(alice, path).andExpect(status().isUnauthorized());
     }
 
-    @Test void importedTaskIsReadOnlyAndUsesMemberScopeNotAssigneeOrTeamOwnerForMockOwner() throws Exception {
+    @Test void importedTaskOwnerIsCreatorNotViewerOrTeamOwnerAndReadsAreSideEffectFree() throws Exception {
         jdbc.update("INSERT INTO team_member VALUES(?,?,'annotator',?)", alice.team(), bob.uid(), IdentityRepository.utc(START));
         String task = importedTask(bob, alice.team());
         var before = database();
         var result = data(bob, membersPath(task));
         memberContract(result, task, bob);
-        assertThat(result.path("owner_uid").asText()).isNotIn(alice.uid(), bob.uid());
-        memberContract(data(alice, membersPath(task)), task, alice);
-        assertThat(data(alice, membersPath(task)).path("owner_uid")).isEqualTo(result.path("owner_uid"));
+        assertThat(data(alice, membersPath(task))).isEqualTo(result);
         for (Actor actor : List.of(alice, bob)) {
             assertThat(items(data(actor, teamPath(actor)))).extracting(row -> row.path("task_id").asText()).doesNotContain(task);
             assertThat(items(data(actor, "/api/v1/tasks/recent"))).extracting(row -> row.path("task_id").asText()).doesNotContain(task);
         }
         assertThat(database()).isEqualTo(before);
-        jdbc.update("UPDATE task_record SET assignee_uid=? WHERE task_id=?", alice.uid(), task);
-        assertThat(data(bob, membersPath(task))).isEqualTo(result);
+        jdbc.update("UPDATE app_user SET username=? WHERE uid=?", "真实创建者新用户名", bob.uid());
+        memberContract(data(alice, membersPath(task)), task, bob);
         jdbc.update("DELETE FROM team_member WHERE team_id=? AND uid=?", alice.team(), bob.uid());
         read(bob, membersPath(task)).andExpect(status().isNotFound());
+        memberContract(data(alice, membersPath(task)), task, bob);
+    }
+
+    @Test void realTaskReadDoesNotDependOnViewerOwningTheirDefaultTeam() throws Exception {
+        jdbc.update("INSERT INTO team_member VALUES(?,?,'annotator',?)", bob.team(), alice.uid(), IdentityRepository.utc(START));
+        String task = importedTask(bob, bob.team());
+        jdbc.update("DELETE FROM team_member WHERE team_id=? AND uid=?", alice.team(), alice.uid());
+        memberContract(data(alice, membersPath(task)), task, bob);
     }
 
     @Test void invisibleRealTaskAndDeletedTaskAre404() throws Exception {
@@ -256,14 +253,22 @@ class DashboardReadIT {
     }
 
     @Test void readsNeverCreateOrMutateBusinessRowsOrTables() throws Exception {
+        String aliceTask = importedTask(alice, alice.team());
+        String bobTask = importedTask(bob, bob.team());
         var before = database();
         var tables = jdbc.queryForList("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC' ORDER BY TABLE_NAME");
         for (Actor actor : List.of(alice, bob)) {
-            for (var row : items(data(actor, teamPath(actor)))) data(actor, membersPath(row.path("task_id").asText()));
-            for (var row : items(data(actor, "/api/v1/tasks/recent"))) data(actor, membersPath(row.path("task_id").asText()));
+            items(data(actor, teamPath(actor)));
+            items(data(actor, "/api/v1/tasks/recent"));
+            for (var row : items(data(actor, teamPath(actor))))
+                read(actor, membersPath(row.path("task_id").asText())).andExpect(status().isNotFound());
         }
+        data(alice, membersPath(aliceTask));
+        data(bob, membersPath(bobTask));
         assertThat(database()).isEqualTo(before);
         assertThat(jdbc.queryForList("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC' ORDER BY TABLE_NAME"))
             .isEqualTo(tables);
     }
+
+
 }
