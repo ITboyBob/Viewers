@@ -145,6 +145,61 @@ test('邀请红点、查看标读、接受入队、真实切队及重登保留',
   }
 });
 
+test('任务卡片在团队与最近看板及刷新后显示非黑影像预览', async ({ page, request }) => {
+  test.setTimeout(120000);
+  const user = await account(request);
+  await login(page, user);
+  const task = await create(page, syntheticSeries().files);
+  await page.goto('/team/tasks');
+  for (const [view, pathname] of [
+    ['团队任务', '/team/tasks'],
+    ['最近任务', '/team/recent'],
+  ] as const) {
+    await page.getByRole('button', { name: view, exact: true }).click();
+    for (const refresh of [false, true]) {
+      if (refresh) {
+        await page.reload();
+      }
+      await expect(page).toHaveURL(new RegExp(`${pathname}$`));
+      await expect(page.getByRole('button', { name: view, exact: true })).toHaveAttribute(
+        'aria-current',
+        'page'
+      );
+      const preview = page.locator(`[data-task-id="${task.task_id}"] img`);
+      await expect(preview).toBeVisible({ timeout: 30000 });
+      await expect
+        .poll(async () =>
+          preview.evaluate(async (element: HTMLImageElement) => {
+            await element.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = element.naturalWidth;
+            canvas.height = element.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              throw new Error('无法读取预览像素');
+            }
+            ctx.drawImage(element, 0, 0);
+            const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            let black = 0,
+              nonblack = 0;
+            for (let i = 0; i < pixels.length; i += 4) {
+              if (pixels[i + 3] !== 255) {
+                continue;
+              }
+              if (pixels[i] === 0 && pixels[i + 1] === 0 && pixels[i + 2] === 0) {
+                black++;
+              } else {
+                nonblack++;
+              }
+            }
+            return black > 0 && nonblack > 0;
+          })
+        )
+        .toBe(true);
+    }
+  }
+});
+
 test('原图与非空Mask自动保存后关闭A窗口，B从后端重开并恢复删除结果', async ({
   page,
   browser,

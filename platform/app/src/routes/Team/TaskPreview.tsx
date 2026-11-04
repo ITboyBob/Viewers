@@ -57,6 +57,10 @@ export default function TaskPreview({
         return;
       }
       const output = ctx.createImageData(canvas.width, canvas.height);
+      // 解码器已完成重标定时，不能再次应用斜率和截距。
+      const scaled = image.preScale?.scaled === true;
+      const slope = scaled ? 1 : (image.slope ?? 1);
+      const intercept = scaled ? 0 : (image.intercept ?? 0);
       const center = Number(
           Array.isArray(image.windowCenter) ? image.windowCenter[0] : image.windowCenter
         ),
@@ -74,10 +78,7 @@ export default function TaskPreview({
         } else {
           let value = Math.max(
             0,
-            Math.min(
-              255,
-              ((pixels[i] * (image.slope ?? 1) + (image.intercept ?? 0) - low) / width) * 255
-            )
+            Math.min(255, ((pixels[i] * slope + intercept - low) / width) * 255)
           );
           if (image.invert) {
             value = 255 - value;
