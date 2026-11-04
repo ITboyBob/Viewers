@@ -45,6 +45,24 @@ export class TeamInvitationService implements TeamInvitationApi {
     return this.allPages('/notifications/team-invitations', signal);
   }
 
+  async unreadCount(signal?: AbortSignal): Promise<number> {
+    const value = await this.api.request<{ unread_count: number }>(
+      '/notifications/team-invitations/unread-count',
+      { signal }
+    );
+    if (!Number.isSafeInteger(value?.unread_count) || value.unread_count < 0)
+      throw new BusinessApiError(502, 'INVALID_RESPONSE', '未读状态响应不完整');
+    return value.unread_count;
+  }
+  async markRead(ids: string[], signal?: AbortSignal): Promise<number> {
+    const value = await this.api.request<{ unread_count: number }>(
+      '/notifications/team-invitations/read',
+      { method: 'POST', body: { invitation_ids: ids }, signal }
+    );
+    if (!Number.isSafeInteger(value?.unread_count) || value.unread_count < 0)
+      throw new BusinessApiError(502, 'INVALID_RESPONSE', '标读响应不完整');
+    return value.unread_count;
+  }
   private async allPages<T>(resource: string, signal?: AbortSignal): Promise<T[]> {
     const result: T[] = [];
     for (let page = 1; ; page++) {

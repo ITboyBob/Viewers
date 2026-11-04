@@ -109,7 +109,7 @@ export default function useLocalTaskImport(
     visitController.current?.abort();
     const visit = new AbortController();
     visitController.current = visit;
-    await tasks.visit?.(project.task_id!, visit.signal);
+    if (!business?.taskStorage) await tasks.visit?.(project.task_id!, visit.signal);
     if (!mounted.current || !projects.isCurrent(project)) {
       return;
     }
@@ -124,6 +124,7 @@ export default function useLocalTaskImport(
       const query = new URLSearchParams();
       project.study_uids.forEach(uid => query.append('StudyInstanceUIDs', uid));
       query.append('datasources', 'dicomlocal');
+      if (project.source_stored && project.task_id) query.set('task_id', project.task_id);
       transferred.current = true;
       navigate(`/${project.mode_path}?${query.toString()}`, {
         state: { phaseOneMask: true, taskReturnTo },

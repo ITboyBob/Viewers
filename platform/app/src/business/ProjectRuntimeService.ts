@@ -9,6 +9,7 @@ import type {
   TaskApi,
   ProjectWorkspaceAdapter,
 } from '@ohif/core';
+import { TaskAutoSave } from './TaskAutoSave';
 import { ProjectUpdateBridge } from './ProjectUpdateBridge';
 
 type Binding = {
@@ -19,9 +20,11 @@ type Binding = {
   scope: LocalImportScope;
   generation: number;
   stopBridge?: () => void;
+  autoSave?: TaskAutoSave;
   restoreController: AbortController;
   restored: boolean;
   captured: boolean;
+  visitRecorded?: boolean;
   notify?: (message: string) => void;
 };
 export class ProjectRuntimeService implements ProjectRuntime {
@@ -32,6 +35,11 @@ export class ProjectRuntimeService implements ProjectRuntime {
   }
   prepareSuspend() {
     const binding = this.binding;
+    if (
+      binding?.autoSave?.hasPending &&
+      !window.confirm('有尚未确认保存的成果，离开可能丢失这些修改。仍要离开吗？')
+    )
+      throw new Error('请等待成果保存或重试后离开');
     if (
       binding &&
       !binding.captured &&
@@ -54,6 +62,25 @@ export class ProjectRuntimeService implements ProjectRuntime {
     }
     binding.notify = message =>
       services.uiNotificationService?.show({ title: '任务恢复', message, type: 'warning' });
+    if (
+      binding.project.source_stored &&
+      binding.project.mode_path === 'segmentation/dicomlocal' &&
+      this.storage
+    ) {
+      if (!this.adapter) throw new Error('原生成果适配器未装配');
+      binding.autoSave?.stop();
+      const saver = new TaskAutoSave(
+        binding.project,
+        this.storage,
+        this.adapter,
+        [services.measurementService, services.segmentationService].filter(Boolean),
+        () => this.binding === binding && !binding.restoreController.signal.aborted
+      );
+      binding.autoSave = saver;
+      await saver.restore(binding.restoreController.signal);
+      binding.restored = true;
+      return;
+    }
     const state = this.projects.getWorkspaceState?.(binding.project);
     if (state !== undefined) {
       if (!this.adapter) {
@@ -78,8 +105,28 @@ export class ProjectRuntimeService implements ProjectRuntime {
   constructor(
     private readonly projects: LocalProjects,
     private readonly tasks?: TaskApi,
-    private readonly onDeactivate?: (project: LocalProject) => void
+    private readonly onDeactivate?: (project: LocalProject) => void,
+    private readonly storage?: import('@ohif/core').TaskStorageApi
   ) {}
+  async startAutoSave() {
+    const binding = this.binding;
+    if (!binding) return;
+    await binding.autoSave?.start();
+    if (
+      binding.project.source_stored &&
+      !binding.visitRecorded &&
+      this.binding === binding &&
+      !binding.restoreController.signal.aborted
+    ) {
+      try {
+        await this.tasks?.visit(binding.project.task_id!, binding.restoreController.signal);
+        binding.visitRecorded = true;
+      } catch (error) {
+        if (!binding.restoreController.signal.aborted)
+          binding.notify?.('任务已加载，但最近访问记录未保存，请稍后重新进入重试');
+      }
+    }
+  }
   get restoringWorkspace() {
     return !!this.binding && !this.binding.restored;
   }
@@ -145,6 +192,7 @@ export class ProjectRuntimeService implements ProjectRuntime {
         binding.active = false;
         binding.generation++;
         binding.stopBridge?.();
+        binding.autoSave?.stop();
         binding.restoreController.abort();
         if (
           !binding.captured &&

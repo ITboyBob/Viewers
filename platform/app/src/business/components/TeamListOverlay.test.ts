@@ -14,7 +14,7 @@ const props = () => ({
   contentRef: React.createRef<HTMLDivElement>(),
   suppressCloseFocusRef: { current: false },
 });
-const open = () => fireEvent.click(screen.getByRole('menuitem', { name: '查看你的团队' }));
+const open = () => fireEvent.click(screen.getByRole('menuitem', { name: '查看我的团队' }));
 afterEach(cleanup);
 
 test('真实团队是唯一勾选首行，示例只展示且所有团队均不可切换', () => {
@@ -53,4 +53,22 @@ test('展开后接收新的会话团队展示，不沿用旧名称或改写团�
   expect(within(menu).queryByText(ownedTeam.name)).toBeNull();
   expect(within(menu).getAllByRole('menuitemradio')[0].textContent).toContain('更新后的团队');
   expect(ownedTeam.team_id).toBe('team-real');
+});
+
+test('真实成员团队可选择，勾选只表达当前上下文而非Owner', async () => {
+  const select = jest.fn().mockResolvedValue(undefined);
+  render(
+    h(TeamListOverlay, {
+      ...props(),
+      ownedTeam,
+      teams: [ownedTeam, { ...ownedTeam, team_id: 'joined', name: '其他团队', role: 'annotator' }],
+      currentTeamId: 'joined',
+      onSelect: select,
+    })
+  );
+  open();
+  const target = screen.getByRole('menuitemradio', { name: ownedTeam.name });
+  expect(target.getAttribute('aria-checked')).toBe('false');
+  fireEvent.click(target);
+  expect(select).toHaveBeenCalledWith(ownedTeam.team_id);
 });

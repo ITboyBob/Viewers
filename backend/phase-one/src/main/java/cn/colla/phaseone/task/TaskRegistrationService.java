@@ -50,7 +50,7 @@ public class TaskRegistrationService {
             throw new ApiException(HttpStatus.CONFLICT, "CONFLICT", "同次登记的请求内容不一致", "IDEMPOTENCY_PAYLOAD_MISMATCH");
         return new RegistrationResult(existing.task(), false);
     }
-    private String digest(String team, String title) {
+    public String digest(String team, String title) {
         try {
             String canonical = json.writeValueAsString(List.of("task-registration-v1", team, title, Map.of()));
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8)));

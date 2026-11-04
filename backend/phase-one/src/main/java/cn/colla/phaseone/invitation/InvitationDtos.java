@@ -36,5 +36,5 @@ public final class InvitationDtos {
     }
     public record InvitationView(String invitation_id, String team_id, String team_name,
         UserSummary inviter, String invitee_uid, Instant created_at, Instant expires_at,
-        String decision, Instant decided_at) {}
+        String decision, Instant decided_at, Instant read_at) {}
 }

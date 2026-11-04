@@ -9,6 +9,7 @@ import TeamPageContainer from './TeamPageContainer';
 import type { TeamPageView } from './TeamPage';
 import CreateTaskButton from './CreateTaskButton';
 import useOpenTask from './useOpenTask';
+import TaskPreview from './TaskPreview';
 import useBusinessLogout from '../../business/useBusinessLogout';
 
 function ConnectedTeamPage({ services, view }: { services: BusinessServices; view: TeamPageView }) {
@@ -29,7 +30,15 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
       services={services}
       onOpenTask={opener.open}
       openingTaskId={opener.opening}
-      canOpenTask={taskId => !!services.localProjects?.getRetained?.(taskId)}
+      renderPreview={taskId => (
+        <TaskPreview
+          taskId={taskId}
+          services={services}
+        />
+      )}
+      canOpenTask={taskId =>
+        !!services.taskStorage || !!services.localProjects?.getRetained?.(taskId)
+      }
       taskStatusSlot={
         <>
           {opener.opening && <p role="status">正在打开任务…</p>}
@@ -57,6 +66,12 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
             onLogout={logout}
             user={context.user}
             ownedTeam={ownedTeam}
+            teams={context.memberships}
+            currentTeamId={snapshot.currentTeamId}
+            onSelectTeam={async id => {
+              await services.session.selectTeam?.(id);
+              navigate('/team/tasks');
+            }}
           />
         )
       }
@@ -66,6 +81,9 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
             key={context.user.uid}
             user={context.user}
             api={services.teamInvitations}
+            onAccepted={async () => {
+              await (services.session.refreshContext?.() ?? services.session.validateCurrent());
+            }}
           />
         )
       }

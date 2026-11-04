@@ -50,6 +50,7 @@ function normalizedContext(value: unknown): SessionContext {
     user: { uid: value.user.uid, username: value.user.username, avatar_url: value.user.avatar_url },
     expires_at: value.expires_at,
     default_team_id: value.default_team_id,
+    ...(value.selected_team_id ? { selected_team_id: value.selected_team_id } : {}),
     memberships: value.memberships.map(({ team_id, name, owner_uid, role }) => ({
       team_id,
       name,
@@ -141,11 +142,18 @@ export class BusinessSessionService implements BusinessSession {
     this.invalidate();
     return pending;
   };
-  private authenticated(context: SessionContext, preserveCandidate: boolean) {
+  private authenticated(context: SessionContext, preserveCandidate: boolean, preserveView = false) {
+    const validCandidate = context.memberships.some(
+      member => member.team_id === this.teamCandidate
+    );
+    const remote = context.memberships.some(member => member.team_id === context.selected_team_id)
+      ? context.selected_team_id
+      : null;
     const candidate =
-      preserveCandidate && context.memberships.some(member => member.team_id === this.teamCandidate)
+      preserveView && validCandidate
         ? this.teamCandidate
-        : context.default_team_id;
+        : (remote ??
+          (preserveCandidate && validCandidate ? this.teamCandidate : context.default_team_id));
     this.expiresAt = context.expires_at;
     this.teamCandidate = candidate;
     this.persist();
@@ -189,6 +197,31 @@ export class BusinessSessionService implements BusinessSession {
   }
   register = (input: BusinessCredentials) => this.authenticate('/users', input);
   login = (input: BusinessCredentials) => this.authenticate('/auth/sessions', input);
+  refreshContext = async () => {
+    if (this.snapshot.status !== 'authenticated') return this.snapshot;
+    const revision = ++this.revision;
+    const value = await this.api.request<SessionContext>('/auth/sessions/current');
+    if (revision === this.revision) return this.authenticated(normalizedContext(value), true, true);
+    return this.snapshot;
+  };
+  selectTeam = async (teamId: string) => {
+    const snapshot = this.snapshot;
+    if (
+      snapshot.status !== 'authenticated' ||
+      !snapshot.context?.memberships.some(m => m.team_id === teamId)
+    )
+      throw new BusinessApiError(403, 'FORBIDDEN', '没有该团队成员资格');
+    const revision = ++this.revision;
+    const context = normalizedContext(
+      await this.api.request<SessionContext>('/auth/sessions/current/team', {
+        method: 'PUT',
+        body: { team_id: teamId },
+      })
+    );
+    if (revision !== this.revision) return this.snapshot;
+    this.teamCandidate = teamId;
+    return this.authenticated(context, true);
+  };
   validateCurrent = async () => {
     if (!this.token) {
       this.invalidate();

@@ -393,3 +393,37 @@ test('注销使用原凭证立即请求DELETE并同步清本地；晚到失败�
   await failure;
   expect(session.getSnapshot().context?.user.uid).toBe('bob');
 });
+
+test('刷新优先后端账号偏好，后台成员刷新不卸载页面或强制切队', async () => {
+  const data = {
+    ...context(),
+    selected_team_id: 'joined',
+    memberships: [
+      ...context().memberships,
+      { team_id: 'joined', name: '已加入团队', owner_uid: 'other', role: 'annotator' },
+    ],
+  };
+  sessionStorage.setItem(
+    key,
+    JSON.stringify({
+      token: 'alice-token',
+      expires_at: context().expires_at,
+      current_team_id: 'alice-team',
+    })
+  );
+  const transport = jest.fn().mockResolvedValue(response(200, data));
+  const { session } = createBusinessServices(
+    { enabled: true },
+    { fetch: transport, storage: sessionStorage }
+  );
+  await session.validateCurrent();
+  expect(session.getSnapshot().currentTeamId).toBe('joined');
+  const states: string[] = [];
+  session.subscribe(() => states.push(session.getSnapshot().status));
+  transport.mockResolvedValue(response(200, { ...data, selected_team_id: 'alice-team' }));
+  await session.refreshContext!();
+  expect(states).toEqual(['authenticated']);
+  expect(session.getSnapshot().currentTeamId).toBe('joined');
+  await session.validateCurrent();
+  expect(session.getSnapshot().currentTeamId).toBe('alice-team');
+});

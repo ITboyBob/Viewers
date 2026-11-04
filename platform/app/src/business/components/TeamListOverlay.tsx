@@ -7,13 +7,21 @@ export default function TeamListOverlay({
   contentRef,
   suppressCloseFocusRef,
   ownedTeam,
+  teams,
+  currentTeamId,
+  onSelect,
 }: {
   ownedTeam?: BusinessTeamMembership;
+  teams?: BusinessTeamMembership[];
+  currentTeamId?: string | null;
+  onSelect?(id: string): Promise<void>;
   contentRef: React.RefObject<HTMLDivElement>;
   suppressCloseFocusRef: React.RefObject<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [compact, setCompact] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     // 窄屏两侧均容不下完整菜单时，改在入口下方展开，不压缩文字或溢出视口。
@@ -46,7 +54,7 @@ export default function TeamListOverlay({
           }}
         >
           <HomeIcon aria-hidden="true" />
-          查看你的团队
+          查看我的团队
           <ChevronRightIcon
             className="business-team-chevron"
             aria-hidden="true"
@@ -84,25 +92,42 @@ export default function TeamListOverlay({
             event.stopPropagation();
           }}
         >
-          <div className="business-team-heading">你的团队</div>
-          {ownedTeam && (
+          <div className="business-team-heading">我的团队</div>
+          {(teams ?? (ownedTeam ? [ownedTeam] : [])).map(team => (
             <button
+              key={team.team_id}
               type="button"
               role="menuitemradio"
-              aria-checked="true"
-              aria-disabled="true"
-              disabled
+              aria-checked={team.team_id === (currentTeamId ?? ownedTeam?.team_id)}
+              aria-disabled={busy || !onSelect}
+              disabled={busy || !onSelect}
               className="business-team-current"
+              onClick={async () => {
+                if (!onSelect) return;
+                setBusy(true);
+                setError('');
+                try {
+                  await onSelect(team.team_id);
+                  setOpen(false);
+                } catch (failure) {
+                  setError(failure instanceof Error ? failure.message : '切换团队失败');
+                } finally {
+                  setBusy(false);
+                }
+              }}
             >
               <HomeIcon aria-hidden="true" />
-              <span className="business-team-name">{ownedTeam.name}</span>
-              <CheckIcon
-                className="business-team-check"
-                role="img"
-                aria-label="当前团队"
-              />
+              <span className="business-team-name">{team.name}</span>
+              {team.team_id === (currentTeamId ?? ownedTeam?.team_id) && (
+                <CheckIcon
+                  className="business-team-check"
+                  role="img"
+                  aria-label="当前团队"
+                />
+              )}
             </button>
-          )}
+          ))}
+          {error && <p role="alert">{error}</p>}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

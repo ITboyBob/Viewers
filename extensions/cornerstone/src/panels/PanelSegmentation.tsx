@@ -1,4 +1,5 @@
 import React from 'react';
+import useTaskReadOnly from '../hooks/useTaskReadOnly';
 import { SegmentationTable } from '@ohif/ui-next';
 import { useActiveViewportSegmentationRepresentations } from '../hooks/useActiveViewportSegmentationRepresentations';
 import { metaData, cache } from '@cornerstonejs/core';
@@ -6,6 +7,7 @@ import { useSystem } from '@ohif/core/src';
 
 export default function PanelSegmentation({ children }: withAppTypes) {
   const { commandsManager, servicesManager } = useSystem();
+  const readOnly = useTaskReadOnly();
   const { customizationService, displaySetService } = servicesManager.services;
 
   const { segmentationsWithRepresentations, disabled } =
@@ -152,7 +154,7 @@ export default function PanelSegmentation({ children }: withAppTypes) {
     mode: segmentationTableMode,
     title: 'Segmentations',
     exportOptions,
-    disableEditing,
+    disableEditing: disableEditing || readOnly,
     onSegmentationAdd,
     showAddSegment,
     renderInactiveSegmentations: handlers.getRenderInactiveSegmentations(),
@@ -211,11 +213,16 @@ export default function PanelSegmentation({ children }: withAppTypes) {
   };
 
   return (
-    <SegmentationTable {...tableProps}>
-      {children}
-      <SegmentationTable.Config />
-      <SegmentationTable.AddSegmentationRow />
-      {renderModeContent()}
-    </SegmentationTable>
+    <fieldset
+      disabled={readOnly}
+      style={{ minWidth: 0, border: 0, padding: 0, margin: 0 }}
+    >
+      <SegmentationTable {...tableProps}>
+        {children}
+        <SegmentationTable.Config />
+        <SegmentationTable.AddSegmentationRow />
+        {renderModeContent()}
+      </SegmentationTable>
+    </fieldset>
   );
 }

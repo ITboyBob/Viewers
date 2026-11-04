@@ -1,9 +1,12 @@
 import { cloneDeep } from 'lodash';
-import { cache, imageLoader } from '@cornerstonejs/core';
+import { cache, imageLoader, geometryLoader, Enums as CoreEnums } from '@cornerstonejs/core';
 import { annotation, segmentation, Enums, utilities } from '@cornerstonejs/tools';
 import type { LocalProject, ProjectWorkspaceAdapter } from '@ohif/core';
 import type { Types as ToolTypes } from '@cornerstonejs/tools';
 import type { Types as CoreTypes } from '@cornerstonejs/core';
+
+import { encodeResult, decodeResult } from './TaskResultCodec';
+import { isMaskOperationActive } from './maskEditing/maskOperationEvents';
 
 type Pixels = CoreTypes.PixelDataTypedArray;
 type Frame = { referenceId: string; rows: number; columns: number; pixels: Pixels };
@@ -18,6 +21,8 @@ type Snapshot = {
     frames: Frame[];
     colors: Record<number, CoreTypes.Color>;
     visible: Record<number, boolean>;
+    contour?: any;
+    geometries?: any[];
   }>;
 };
 type Events = {
@@ -42,6 +47,7 @@ type Services = {
   };
   segmentationService: Events & {
     getSegmentations(): ToolTypes.Segmentation[];
+    remove?(id: string): void;
     getRepresentationsForSegmentation(
       id: string
     ): Array<{ viewportId: string; representations: ToolTypes.SegmentationRepresentation[] }>;
@@ -53,7 +59,9 @@ type Services = {
       viewport: string,
       input: {
         segmentationId: string;
-        type: typeof Enums.SegmentationRepresentations.Labelmap;
+        type:
+          | typeof Enums.SegmentationRepresentations.Labelmap
+          | typeof Enums.SegmentationRepresentations.Contour;
         suppressEvents: boolean;
       }
     ): Promise<void>;
@@ -120,7 +128,8 @@ function blockWorkspace(signal: AbortSignal) {
 
 /** 只保存数据副本，不保存服务、视口、DOM或渲染对象。 */
 export default function createProjectWorkspaceAdapter(services: Services): ProjectWorkspaceAdapter {
-  return {
+  const adapter: ProjectWorkspaceAdapter = {
+    isBusy: isMaskOperationActive,
     capture(project: LocalProject): Snapshot {
       const belongs = (imageId: string | undefined) => imageBelongs(project, imageId);
       const annotations = annotation.state
@@ -139,7 +148,33 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
         );
       const segmentations = services.segmentationService.getSegmentations().map(mask => {
         if (!mask.representationData.Labelmap) {
-          throw new Error('当前分割类型不支持内存恢复，请先导出');
+          const contour = mask.representationData.Contour;
+          if (!contour) throw new Error('不支持的成果表示，未保存');
+          const geometries = (contour.geometryIds ?? []).map(id => {
+            const geometry = cache.getGeometry(id)?.data as any;
+            if (!geometry) throw new Error('轮廓几何尚未加载');
+            return {
+              id,
+              frameOfReferenceUID: geometry.frameOfReferenceUID,
+              segmentIndex: geometry.segmentIndex,
+              color: geometry.color,
+              data: geometry.contours.map(c => ({
+                points: cloneDeep(c.points),
+                type: c.type,
+                color: c.color,
+              })),
+            };
+          });
+          return {
+            segmentationId: mask.segmentationId,
+            label: mask.label,
+            segments: cloneDeep(mask.segments),
+            contour: cloneDeep(contour),
+            geometries,
+            frames: [],
+            colors: {},
+            visible: {},
+          };
         }
         const frames = (
           segmentation.getLabelmapImageIds(mask.segmentationId) as unknown as string[]
@@ -177,6 +212,11 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
             visible[index] = representation.representations[0]?.segments?.[index]?.visible ?? true;
           }
         }
+        if (!representation)
+          for (const [index, segment] of Object.entries(mask.segments)) {
+            const color = (segment as typeof segment & { color?: CoreTypes.Color }).color;
+            if (color) colors[Number(index)] = [...color] as CoreTypes.Color;
+          }
         return {
           segmentationId: mask.segmentationId,
           label: mask.label,
@@ -192,6 +232,101 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
         measurements: cloneDeep(measurements),
         segmentations,
       };
+    },
+    setReadOnly(readOnly) {
+      const processed = new Set<ToolTypes.IToolGroup>();
+      for (const viewportId of services.viewportGridService.getState().viewports.keys()) {
+        const group = services.toolGroupService.getToolGroupForViewport(viewportId);
+        if (!group || processed.has(group)) continue;
+        processed.add(group);
+        for (const [name, tool] of Object.entries(group.getToolInstances())) {
+          if (
+            /^(Pan|Zoom|WindowLevel|StackScroll|Crosshairs|TrackballRotate|VolumeRotate|Magnify)/.test(
+              name
+            )
+          )
+            continue;
+          // 标注保持可见；只停用当前活动的编辑工具，避免未使用画笔触发共享预览清理。
+          const editableTool = tool as { mode?: string; isPointNearTool?: unknown };
+          if (typeof editableTool.isPointNearTool === 'function') {
+            if (readOnly) group.setToolEnabled(name);
+            else group.setToolPassive(name);
+          } else if (readOnly && editableTool.mode === 'Active') {
+            group.setToolEnabled(name);
+          }
+        }
+        if (readOnly && group.hasTool('WindowLevel'))
+          group.setToolActive('WindowLevel', { bindings: [{ mouseButton: 1 }] });
+      }
+    },
+    async exportArtifacts(project) {
+      const state = adapter.capture(project) as Snapshot;
+      const artifacts: import('@ohif/core').ResultArtifact[] = [];
+      const contourIds = new Set(
+        state.annotations
+          .filter(a => a.metadata.toolName?.includes('Contour'))
+          .map(a => a.annotationUID)
+      );
+      const groups: Array<[import('@ohif/core').ResultArtifact['type'], Snapshot]> = [
+        [
+          'SR',
+          {
+            ...state,
+            annotations: state.annotations.filter(
+              a =>
+                !contourIds.has(a.annotationUID) &&
+                state.measurements.some(m => m.uid === a.annotationUID)
+            ),
+            measurements: state.measurements.filter(m => !contourIds.has(m.uid as string)),
+            segmentations: [],
+          },
+        ],
+        [
+          'SEG',
+          {
+            ...state,
+            annotations: [],
+            measurements: [],
+            segmentations: state.segmentations
+              .filter(m => !m.contour)
+              .map(m => ({ ...m, visible: {} })),
+          },
+        ],
+        [
+          'RTSTRUCT',
+          {
+            ...state,
+            annotations: state.annotations.filter(a => contourIds.has(a.annotationUID)),
+            measurements: state.measurements.filter(m => contourIds.has(m.uid as string)),
+            segmentations: state.segmentations.filter(m => m.contour),
+          },
+        ],
+      ];
+      for (const [type, value] of groups)
+        if (value.annotations.length || value.segmentations.length)
+          artifacts.push({ type, blob: encodeResult(project, type, value) });
+      return artifacts;
+    },
+    async importArtifacts(project, artifacts, signal) {
+      const state: Snapshot = {
+        taskId: project.task_id!,
+        annotations: [],
+        measurements: [],
+        segmentations: [],
+      };
+      for (const artifact of artifacts) {
+        const value = (await decodeResult(project, artifact)) as Snapshot;
+        state.annotations.push(...value.annotations);
+        state.measurements.push(...value.measurements);
+        state.segmentations.push(...value.segmentations);
+      }
+      // 同任务重新同步前清除旧表示，避免后端已经删除的对象留在本窗。
+      for (const mask of services.segmentationService.getSegmentations())
+        services.segmentationService.remove?.(mask.segmentationId);
+      for (const item of annotation.state.getAllAnnotations())
+        if (imageBelongs(project, item.metadata.referencedImageId))
+          annotation.state.removeAnnotation(item.annotationUID);
+      await adapter.restore(project, state, signal);
     },
     async restore(project: LocalProject, value: unknown, signal: AbortSignal) {
       check(signal);
@@ -217,6 +352,28 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
         }
         check(signal);
         for (const mask of state.segmentations) {
+          if (mask.contour) {
+            for (const geometry of mask.geometries ?? [])
+              await geometryLoader.createAndCacheGeometry(geometry.id, {
+                type: CoreEnums.GeometryType.CONTOUR,
+                geometryData: geometry,
+              });
+            services.segmentationService.addOrUpdateSegmentation({
+              segmentationId: mask.segmentationId,
+              representation: {
+                type: Enums.SegmentationRepresentations.Contour,
+                data: cloneDeep(mask.contour),
+              },
+              config: { label: mask.label, segments: cloneDeep(mask.segments) },
+            });
+            for (const viewportId of viewportIds())
+              await services.segmentationService.addSegmentationRepresentation(viewportId, {
+                segmentationId: mask.segmentationId,
+                type: Enums.SegmentationRepresentations.Contour,
+                suppressEvents: true,
+              });
+            continue;
+          }
           if (mask.frames.some(frame => !belongs(frame.referenceId))) {
             throw new Error('Mask快照包含其他任务影像');
           }
@@ -225,9 +382,16 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
             await imageLoader.loadAndCacheImage(frame.referenceId);
             check(signal);
           }
-          const images = await imageLoader.createAndCacheDerivedLabelmapImages(
-            mask.frames.map(frame => frame.referenceId)
-          );
+          const references = mask.frames.map(frame => frame.referenceId);
+          const kind = mask.frames[0]?.pixels.constructor.name ?? 'Uint8Array';
+          if (mask.frames.some(frame => frame.pixels.constructor.name !== kind))
+            throw new Error('标签图像素类型不一致');
+          const images =
+            kind === 'Uint8Array'
+              ? await imageLoader.createAndCacheDerivedLabelmapImages(references)
+              : await imageLoader.createAndCacheDerivedImages(references, {
+                  targetBuffer: { type: kind },
+                } as any);
           check(signal);
           images.forEach((image, index) => {
             const frame = mask.frames[index];
@@ -340,4 +504,5 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
       }
     },
   };
+  return adapter;
 }

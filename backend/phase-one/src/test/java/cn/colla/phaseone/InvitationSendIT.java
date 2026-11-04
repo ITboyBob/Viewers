@@ -96,7 +96,7 @@ class InvitationSendIT extends InvitationTestSupport {
 
     @Test void h2EnforcesForeignKeysDecisionConsistencyExpiryAndMemberUniqueness() throws Exception {
         var owner = register("owner"); var user = register("recipient"); var invitation = invite(owner, user);
-        String insert = "INSERT INTO team_invitation VALUES(?,?,?,?,?,?,?,?)";
+        String insert = "INSERT INTO team_invitation(invitation_id,team_id,inviter_uid,invitee_uid,created_at,expires_at,decision,decided_at) VALUES(?,?,?,?,?,?,?,?)";
         for (var values : List.<Object[]>of(
             new Object[]{UUID.randomUUID().toString(), "missing-team", uid(owner), uid(user), utc(START), utc(START.plusSeconds(300)), "pending", null},
             new Object[]{UUID.randomUUID().toString(), team(owner), "missing-user", uid(user), utc(START), utc(START.plusSeconds(300)), "pending", null},

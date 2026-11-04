@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import useTaskReadOnly from '../hooks/useTaskReadOnly';
 import { useSystem } from '@ohif/core';
 import { useViewportGrid } from '@ohif/ui-next';
 import { StackViewport, VolumeViewport, eventTarget } from '@cornerstonejs/core';
@@ -15,6 +16,7 @@ export default function MaskEditingTools() {
   const { servicesManager, commandsManager } = useSystem();
   const { segmentationService, cornerstoneViewportService } = servicesManager.services;
   const [grid] = useViewportGrid();
+  const readOnly = useTaskReadOnly();
   const { segmentationsWithRepresentations } = useActiveViewportSegmentationRepresentations();
   const [lower, setLower] = useState('150');
   const [upper, setUpper] = useState('2000');
@@ -31,7 +33,8 @@ export default function MaskEditingTools() {
   const viewport = cornerstoneViewportService.getCornerstoneViewport(grid?.activeViewportId);
   const isSliceViewport = viewport instanceof StackViewport || viewport instanceof VolumeViewport;
   const enabled = Boolean(
-    isSliceViewport &&
+    !readOnly &&
+      isSliceViewport &&
       active?.representationData.Labelmap &&
       segment &&
       !segment.locked &&

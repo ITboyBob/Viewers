@@ -6,7 +6,7 @@ spring:
   datasource:
     url: jdbc:h2:mem:${colla.database-name};DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     username: sa
-    password: ""
+    password: ''
     hikari:
       maximum-pool-size: 10
   sql:
@@ -17,6 +17,7 @@ spring:
         - optional:classpath:db/V002__invitations.sql
         - optional:classpath:db/V003__tasks.sql
         - optional:classpath:db/V004__task_visits.sql
+        - classpath:db/V005__workspace_storage.sql
   h2:
     console:
       enabled: false
@@ -34,3 +35,7 @@ management:
       show-details: never
 colla:
   database-name: colla_phase_one
+  storage:
+    max-file-bytes: 536870912
+    max-study-bytes: 2147483648
+    max-runtime-bytes: 17179869184

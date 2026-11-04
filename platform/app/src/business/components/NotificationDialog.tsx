@@ -11,13 +11,19 @@ import type {
 } from '@ohif/core';
 import BusinessDialog from './BusinessDialog';
 
-type Props = { api?: TeamInvitationApi; store?: CollaborationMockApi; user: BusinessUserSummary };
+type Props = {
+  api?: TeamInvitationApi;
+  store?: CollaborationMockApi;
+  user: BusinessUserSummary;
+  onAccepted?(): Promise<void>;
+  onRead?(count: number): void;
+};
 const message = (failure: unknown) =>
   failure instanceof Error ? failure.message : '操作失败，请重试。';
 const itemKey = (item: NotificationItem) =>
   item.kind === 'team_join' ? `team:${item.invitation.invitation_id}` : `mock:${item.mock_id}`;
 
-function NotificationBody({ api, store, user }: Props) {
+function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
   const [real, setReal] = useState<InvitationView[]>([]);
   const [mock, setMock] = useState<MockInvitation[]>([]);
   const [realError, setRealError] = useState('');
@@ -73,6 +79,28 @@ function NotificationBody({ api, store, user }: Props) {
     };
   }, [refresh, store]);
 
+  useEffect(() => {
+    if (loading || realError || !api?.markRead || !real.length) return;
+    const ids = real.filter(item => item.read_at === null).map(item => item.invitation_id);
+    if (!ids.length) return;
+    const controller = new AbortController();
+    api
+      .markRead(ids, controller.signal)
+      .then(count => {
+        if (controller.signal.aborted || !alive.current) return;
+        setReal(items =>
+          items.map(item =>
+            ids.includes(item.invitation_id) ? { ...item, read_at: new Date().toISOString() } : item
+          )
+        );
+        onRead?.(count);
+      })
+      .catch(error => {
+        if (!controller.signal.aborted && alive.current) setActionError(message(error));
+      });
+    return () => controller.abort();
+  }, [api, real, loading, realError, onRead]);
+
   const decide = async (
     item: NotificationItem,
     decision: Exclude<InvitationDecision, 'pending'>
@@ -100,6 +128,7 @@ function NotificationBody({ api, store, user }: Props) {
             items.map(value => (value.invitation_id === result.invitation_id ? result : value))
           );
           await refresh();
+          if (decision === 'accepted') await onAccepted?.();
         }
       } else {
         if (!store) {
@@ -230,6 +259,37 @@ function NotificationBody({ api, store, user }: Props) {
 
 export default function NotificationDialog(props: Props) {
   const [open, setOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const [readError, setReadError] = useState('');
+  useEffect(() => {
+    if (!props.api?.unreadCount) return;
+    let alive = true;
+    let controller: AbortController | undefined;
+    const check = () => {
+      controller?.abort();
+      controller = new AbortController();
+      const current = controller;
+      props.api!.unreadCount!(current.signal)
+        .then(count => {
+          if (alive && !current.signal.aborted) {
+            setUnread(count);
+            setReadError('');
+          }
+        })
+        .catch(error => {
+          if (alive && !current.signal.aborted) setReadError(message(error));
+        });
+    };
+    check();
+    const timer = setInterval(check, 30000);
+    window.addEventListener('focus', check);
+    return () => {
+      alive = false;
+      controller?.abort();
+      clearInterval(timer);
+      window.removeEventListener('focus', check);
+    };
+  }, [props.api, props.user.uid]);
   return (
     <BusinessDialog
       title="通知"
@@ -245,10 +305,35 @@ export default function NotificationDialog(props: Props) {
         >
           <BellIcon aria-hidden="true" />
           通知
+          {unread > 0 && (
+            <span
+              aria-label="有未读通知"
+              style={{
+                display: 'inline-block',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: '#ef4444',
+              }}
+            />
+          )}
+          {readError && (
+            <span
+              role="status"
+              title={readError}
+            >
+              读取失败
+            </span>
+          )}
         </button>
       }
     >
-      {open && <NotificationBody {...props} />}
+      {open && (
+        <NotificationBody
+          {...props}
+          onRead={setUnread}
+        />
+      )}
     </BusinessDialog>
   );
 }

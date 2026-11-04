@@ -12,6 +12,7 @@ import {
 import {
   Enums as csToolsEnums,
   segmentation as cstSegmentation,
+  annotation as cstAnnotation,
   Types as cstTypes,
 } from '@cornerstonejs/tools';
 import { PubSubService, Types as OHIFTypes } from '@ohif/core';
@@ -893,6 +894,7 @@ class SegmentationService extends PubSubService {
    *
    */
   public removeSegment(segmentationId: string, segmentIndex: number): void {
+    this.removeAssociatedMeasurements(segmentationId, segmentIndex);
     cstSegmentation.removeSegment(segmentationId, segmentIndex);
   }
 
@@ -969,6 +971,8 @@ class SegmentationService extends PubSubService {
     segmentIndex: number,
     color: csTypes.Color
   ): void {
+    const segment = this.getSegmentation(segmentationId)?.segments?.[segmentIndex];
+    if (segment) Object.assign(segment, { color: [...color] });
     cstSegmentation.config.color.setSegmentIndexColor(
       viewportId,
       segmentationId,
@@ -990,11 +994,14 @@ class SegmentationService extends PubSubService {
    * The returned color is an array of 4 numbers representing RGBA values.
    */
   public getSegmentColor(viewportId: string, segmentationId: string, segmentIndex: number) {
-    return cstSegmentation.config.color.getSegmentIndexColor(
+    const color = cstSegmentation.config.color.getSegmentIndexColor(
       viewportId,
       segmentationId,
       segmentIndex
     );
+    const segment = this.getSegmentation(segmentationId)?.segments?.[segmentIndex];
+    if (color && segment) Object.assign(segment, { color: [...color] });
+    return color ?? (segment as Segment & { color?: csTypes.Color })?.color;
   }
 
   /**
@@ -1138,11 +1145,29 @@ class SegmentationService extends PubSubService {
    * Completely removes a segmentation from the state
    * @param segmentationId - The ID of the segmentation to remove.
    */
+  private removeAssociatedMeasurements(segmentationId: string, segmentIndex?: number): void {
+    for (const item of cstAnnotation.state.getAllAnnotations()) {
+      const metadata = item.metadata as typeof item.metadata & {
+        segmentationId?: string;
+        segmentIndex?: number;
+      };
+      if (
+        metadata.segmentationId === segmentationId &&
+        (segmentIndex === undefined || metadata.segmentIndex === segmentIndex)
+      ) {
+        this.servicesManager.services.measurementService?.remove(item.annotationUID);
+        cstAnnotation.state.removeAnnotation(item.annotationUID);
+      }
+    }
+  }
   public remove(segmentationId: string): void {
+    this.removeAssociatedMeasurements(segmentationId);
     cstSegmentation.state.removeSegmentation(segmentationId);
   }
 
   public removeAllSegmentations(): void {
+    for (const item of this.getSegmentations())
+      this.removeAssociatedMeasurements(item.segmentationId);
     cstSegmentation.state.removeAllSegmentations();
   }
 

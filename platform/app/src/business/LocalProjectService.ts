@@ -136,13 +136,78 @@ export class LocalProjectService implements LocalProjects {
     this.projectGeneration.set(project, generation);
     return project;
   }
+  async restoreStored(
+    materials: import('@ohif/core').TaskMaterials,
+    input: ImportSelection,
+    signal?: AbortSignal
+  ): Promise<LocalProject> {
+    const before = this.session.getSnapshot();
+    if (
+      before.status !== 'authenticated' ||
+      !before.context?.memberships.some(m => m.team_id === materials.task.team_id)
+    )
+      throw new Error('没有任务资格');
+    this.dispose();
+    const generation = this.generation,
+      attempt = ++this.attempt;
+    if (signal?.aborted) throw new Error('任务加载已取消');
+    const batch = await (this.dependencies.parse ?? this.parse)(input);
+    const after = this.session.getSnapshot();
+    if (
+      signal?.aborted ||
+      attempt !== this.attempt ||
+      after.status !== 'authenticated' ||
+      after.context?.user.uid !== before.context.user.uid ||
+      !after.context.memberships.some(m => m.team_id === materials.task.team_id) ||
+      generation !== this.generation ||
+      batch.failures.length ||
+      batch.successes.length !== materials.source.files.length
+    ) {
+      this.release(batch);
+      throw new Error('原始影像恢复失败或身份已变化');
+    }
+    const expected = [...materials.source.files].sort(
+      (a, b) => a.selection_index - b.selection_index
+    );
+    if (
+      batch.successes.some(
+        (s, i) =>
+          s.study_uid !== expected[i].study_uid ||
+          s.series_uid !== expected[i].series_uid ||
+          s.sop_uid !== expected[i].sop_uid
+      )
+    ) {
+      this.release(batch);
+      throw new Error('影像UID与任务清单不匹配');
+    }
+    const project: LocalProject = {
+      ...batch,
+      ...materials.task,
+      importer_uid: materials.task.assignee_uid,
+      viewer_uid: before.context.user.uid,
+      team_id: materials.task.team_id,
+      title: materials.task.title,
+      registration_key: materials.source.registration_key,
+      mode_path: materials.source.mode_path,
+      phase: 'registered',
+      can_edit: materials.access.can_edit,
+      source_stored: true,
+    };
+    this.current = project;
+    this.batch = batch;
+    this.batches.set(project, batch);
+    this.selections.set(project, input);
+    this.projectGeneration.set(project, generation);
+    this.retain(project);
+    return project;
+  }
   private eligible(project: LocalProject) {
     const snapshot = this.session.getSnapshot();
     return (
       this.projectGeneration.get(project) === this.generation &&
       project.phase === 'registered' &&
       snapshot.status === 'authenticated' &&
-      snapshot.context?.user.uid === project.importer_uid &&
+      snapshot.context?.user.uid === (project.viewer_uid ?? project.importer_uid) &&
       snapshot.context.memberships.some(member => member.team_id === project.team_id)
     );
   }
@@ -193,7 +258,7 @@ export class LocalProjectService implements LocalProjects {
     }
   };
   getSelection = (project: LocalProject) =>
-    this.eligible(project) ? this.selections.get(project) : undefined;
+    this.eligible(project) || this.isCurrent(project) ? this.selections.get(project) : undefined;
   setWorkspaceState = (project: LocalProject, state: unknown) => {
     if (this.eligible(project)) {
       this.workspaceStates.set(project, state);
@@ -231,7 +296,7 @@ export class LocalProjectService implements LocalProjects {
       this.current === project &&
       this.projectGeneration.get(project) === this.generation &&
       snapshot.status === 'authenticated' &&
-      snapshot.context?.user.uid === project.importer_uid &&
+      snapshot.context?.user.uid === (project.viewer_uid ?? project.importer_uid) &&
       project.phase !== 'invalid' &&
       project.phase !== 'disposed'
     );

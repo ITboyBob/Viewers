@@ -951,6 +951,14 @@ function commandsModule({
       });
     },
     setToolActive: ({ toolName, toolGroupId = null }) => {
+      const project = servicesManager.services.businessServices?.projectRuntime?.getCurrent?.();
+      if (
+        project?.can_edit === false &&
+        !/^(Pan|Zoom|WindowLevel|StackScroll|Crosshairs|TrackballRotate|VolumeRotate|Magnify)/.test(
+          toolName
+        )
+      )
+        return;
       const { viewports } = viewportGridService.getState();
 
       if (!viewports.size) {
@@ -2590,6 +2598,25 @@ function commandsModule({
     initializeSegmentLabelTool: actions.initializeSegmentLabelTool,
   };
 
+  for (const [name, definition] of Object.entries(definitions as Record<string, any>)) {
+    if (
+      /^(addSegment|addNewSegment|createLabelmap|create.*Segmentation|delete|removeMeasurement|editSegment|editSegmentation|editMeasurement|setSegmentLabel|setSegmentColor|runSegmentBidirectional|apply.*Threshold|thresholdMask|fillMask|growMask|splitMask|undoMask|redoMask)/i.test(
+        name
+      )
+    ) {
+      const run = typeof definition === 'function' ? definition : definition.commandFn;
+      const guarded = (...args) => {
+        if (
+          servicesManager.services.businessServices?.projectRuntime?.getCurrent?.()?.can_edit ===
+          false
+        )
+          return;
+        return run(...args);
+      };
+      if (typeof definition === 'function') definitions[name] = guarded;
+      else definition.commandFn = guarded;
+    }
+  }
   return {
     actions,
     definitions,

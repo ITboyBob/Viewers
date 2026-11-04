@@ -8,7 +8,7 @@ const openMember = async () => {
   fireEvent.click(screen.getByRole('button', { name: '成员' }));
   return screen.findByRole('dialog', { name: '个人信息' });
 };
-const teamTrigger = () => screen.getByRole('menuitem', { name: '查看你的团队' });
+const teamTrigger = () => screen.getByRole('menuitem', { name: '查看我的团队' });
 const teamMenu = () => screen.getByRole('menu', { name: '团队列表' });
 afterEach(cleanup);
 

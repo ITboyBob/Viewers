@@ -102,7 +102,7 @@ test('团队页个人入口传真实默认自有团队，通知不接协作 mock
   mount();
   await screen.findByText('后端演示任务');
   fireEvent.click(screen.getByRole('button', { name: '我的', exact: true }));
-  fireEvent.click(screen.getByRole('menuitem', { name: '查看你的团队' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '查看我的团队' }));
   expect(
     screen.getByRole('menuitemradio', { name: /团队页用户的团队/ }).getAttribute('aria-checked')
   ).toBe('true');

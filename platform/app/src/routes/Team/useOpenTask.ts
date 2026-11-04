@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { DicomMetadataStore } from '@ohif/core';
 import type { BusinessServices, ProjectLifecycleHandle } from '@ohif/core';
 
-/** 只激活本页保留的真实任务；没有本地影像时绝不创建空工作台或重登记。 */
+/** 优先从后端恢复授权任务；原图未准备好时绝不创建空工作台或重登记。 */
 export default function useOpenTask(services: BusinessServices) {
   const navigate = useNavigate(),
     location = useLocation();
@@ -30,13 +30,14 @@ export default function useOpenTask(services: BusinessServices) {
     controller.current = abort;
     const projects = services.localProjects,
       runtime = services.projectRuntime;
-    const project = projects?.getRetained?.(taskId);
+    let project = projects?.getRetained?.(taskId);
     let scope: ReturnType<typeof DicomMetadataStore.prepareLocalImportScope> | undefined;
     let handle: ProjectLifecycleHandle | undefined;
     let transferred = false;
     const eligible = () =>
       mounted.current && !abort.signal.aborted && projects?.getRetained?.(taskId) === project;
     try {
+      if (services.taskStorage) project = await services.taskStorage.open(taskId, abort.signal);
       if (!project || !projects || !runtime || !services.tasks || !services.teamPage) {
         throw new Error('当前页面未保留该任务影像，需重新导入；重新导入会创建新任务。');
       }
@@ -44,7 +45,7 @@ export default function useOpenTask(services: BusinessServices) {
       if (!eligible()) {
         return;
       }
-      await services.tasks.visit(taskId, abort.signal);
+      if (!services.taskStorage) await services.tasks.visit(taskId, abort.signal);
       if (!eligible()) {
         return;
       }
@@ -63,6 +64,7 @@ export default function useOpenTask(services: BusinessServices) {
       const query = new URLSearchParams();
       project.study_uids.forEach(uid => query.append('StudyInstanceUIDs', uid));
       query.set('datasources', 'dicomlocal');
+      if (project.source_stored && project.task_id) query.set('task_id', project.task_id);
       navigate(`/${project.mode_path}?${query}`, {
         state: {
           phaseOneMask: true,

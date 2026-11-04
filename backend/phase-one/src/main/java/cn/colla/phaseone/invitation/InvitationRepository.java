@@ -33,7 +33,7 @@ public class InvitationRepository {
             Integer.class, teamId, uid, utc(now)) > 0;
     }
     public void insert(String id, String teamId, String sender, String recipient, Instant now) {
-        jdbc.update("INSERT INTO team_invitation VALUES(?,?,?,?,?,?,'pending',NULL)", id, teamId, sender, recipient, utc(now), utc(now.plusSeconds(300)));
+        jdbc.update("INSERT INTO team_invitation(invitation_id,team_id,inviter_uid,invitee_uid,created_at,expires_at,decision,decided_at) VALUES(?,?,?,?,?,?,'pending',NULL)", id, teamId, sender, recipient, utc(now), utc(now.plusSeconds(300)));
     }
     public record DecisionRow(String teamId, String recipient, Instant expiresAt, String decision) {}
     public String visibleTeam(String id, String recipient) {
@@ -66,7 +66,7 @@ public class InvitationRepository {
         return new InvitationView(r.getString("invitation_id"), r.getString("team_id"), r.getString("team_name"),
             new UserSummary(r.getString("inviter_uid"), r.getString("inviter_name"), r.getString("inviter_avatar")),
             r.getString("invitee_uid"), r.getObject("created_at", OffsetDateTime.class).toInstant(),
-            r.getObject("expires_at", OffsetDateTime.class).toInstant(), r.getString("decision"), decided == null ? null : decided.toInstant());
+            r.getObject("expires_at", OffsetDateTime.class).toInstant(), r.getString("decision"), decided == null ? null : decided.toInstant(), r.getObject("read_at", OffsetDateTime.class) == null ? null : r.getObject("read_at", OffsetDateTime.class).toInstant());
     }
     public static ApiException notFound() { return new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "资源不存在"); }
 }

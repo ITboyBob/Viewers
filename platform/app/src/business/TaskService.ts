@@ -66,7 +66,8 @@ export class TaskService implements TaskApi {
   private readonly accepted = new WeakMap<LocalProject, BusinessTask>();
   constructor(
     private readonly api: BusinessApi,
-    private readonly projects: LocalProjects
+    private readonly projects: LocalProjects,
+    private readonly storage?: import('@ohif/core').TaskStorageApi
   ) {}
   visit(taskId: string, signal?: AbortSignal): Promise<void> {
     return this.api.request(`/tasks/${encodeURIComponent(taskId)}/visits`, {
@@ -98,19 +99,19 @@ export class TaskService implements TaskApi {
   }
   private async send(project: LocalProject, controller: AbortController): Promise<BusinessTask> {
     try {
-      const value = await this.api.request<unknown>(
-        `/teams/${encodeURIComponent(project.team_id)}/tasks`,
-        {
-          method: 'POST',
-          body: { title: project.title },
-          idempotencyKey: project.registration_key,
-          signal: controller.signal,
-        }
-      );
+      const value = this.storage
+        ? await this.storage.register(project, controller.signal)
+        : await this.api.request<unknown>(`/teams/${encodeURIComponent(project.team_id)}/tasks`, {
+            method: 'POST',
+            body: { title: project.title },
+            idempotencyKey: project.registration_key,
+            signal: controller.signal,
+          });
       if (controller.signal.aborted || !this.projects.isCurrent(project)) {
         throw new BusinessApiError(0, 'CANCELLED', '已离开原批次或身份变化，忽略晚响应');
       }
       const task = validatedTask(value, project);
+      if (this.storage) project.source_stored = true;
       Object.assign(project, {
         task_id: task.task_id,
         created_at: task.created_at,

@@ -19,6 +19,11 @@ public class AuthController {
         return new Data<>(issued);
     }
     @GetMapping("/current") public Data<SessionContext> current(@AuthenticationPrincipal SessionPrincipal principal) { return new Data<>(sessions.context(principal)); }
+    public record SelectTeam(String team_id) {}
+    @PutMapping("/current/team") public Data<SessionContext> selectTeam(@AuthenticationPrincipal SessionPrincipal principal, @RequestBody SelectTeam input) {
+        if (input == null) throw cn.colla.phaseone.shared.ApiException.validation();
+        return new Data<>(sessions.selectTeam(principal, input.team_id()));
+    }
     @DeleteMapping("/current") @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(HttpServletRequest request) { request.setAttribute("colla.actor", sessions.revoke(BearerSessionFilter.token(request))); }
 }

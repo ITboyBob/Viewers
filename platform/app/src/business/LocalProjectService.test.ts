@@ -310,3 +310,55 @@ test.each(['loading', 'error'] as const)(
     expect(service.getWorkspaceState(a)).toEqual({ saved: true });
   }
 );
+
+function storedMaterials(): any {
+  return {
+    task: {
+      task_id: 'stored-task',
+      team_id: 't',
+      title: 'backend-title',
+      assignee_uid: 'original-creator',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
+    },
+    source: {
+      mode_path: 'segmentation/dicomlocal',
+      registration_key: 'stored-key',
+      files: batch().successes.map(x => ({ ...x, file_id: String(x.selection_index), size: 1 })),
+    },
+    access: { can_edit: true },
+  };
+}
+test('后端重开保留真实创建者和task_id，以当前查看者资格激活而不伪造Owner', async () => {
+  const p = await service.restoreStored(storedMaterials(), selection);
+  expect(p.importer_uid).toBe('original-creator');
+  expect(p.viewer_uid).toBe('u');
+  expect(p.task_id).toBe('stored-task');
+  expect(service.isCurrent(p)).toBe(true);
+});
+test('登记阶段仍能取得原始文件，但已失效身份不能取得', async () => {
+  const p = await service.create(selection);
+  p!.phase = 'registering';
+  expect(service.getSelection(p!)).toEqual(selection);
+  snapshot = { status: 'invalid', context: null, currentTeamId: null, error: null };
+  emit();
+  expect(service.getSelection(p!)).toBeUndefined();
+});
+test('已取消或成员资格变化的后端恢复不能激活，必须释放解析批次', async () => {
+  const controller = new AbortController();
+  parse.mockImplementationOnce(async () => {
+    controller.abort();
+    return batch();
+  });
+  await expect(
+    service.restoreStored(storedMaterials(), selection, controller.signal)
+  ).rejects.toThrow();
+  expect(service.getCurrent()).toBeNull();
+  expect(release).toHaveBeenCalled();
+  parse.mockImplementationOnce(async () => {
+    snapshot = { ...snapshot, context: { ...snapshot.context!, memberships: [] } };
+    return batch();
+  });
+  await expect(service.restoreStored(storedMaterials(), selection)).rejects.toThrow();
+  expect(service.getCurrent()).toBeNull();
+});

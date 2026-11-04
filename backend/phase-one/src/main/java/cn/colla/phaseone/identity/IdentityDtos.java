@@ -14,9 +14,9 @@ public final class IdentityDtos {
     }
     public record UserSummary(String uid, String username, String avatar_url) {}
     public record TeamMembership(String team_id, String name, String owner_uid, String role) {}
-    public record SessionContext(UserSummary user, Instant expires_at, String default_team_id, List<TeamMembership> memberships) {}
-    public record IssuedSession(String token, UserSummary user, Instant expires_at, String default_team_id, List<TeamMembership> memberships) {
-        public IssuedSession(String token, SessionContext context) { this(token, context.user(), context.expires_at(), context.default_team_id(), context.memberships()); }
+    public record SessionContext(UserSummary user, Instant expires_at, String default_team_id, List<TeamMembership> memberships, String selected_team_id) {}
+    public record IssuedSession(String token, UserSummary user, Instant expires_at, String default_team_id, List<TeamMembership> memberships, String selected_team_id) {
+        public IssuedSession(String token, SessionContext context) { this(token, context.user(), context.expires_at(), context.default_team_id(), context.memberships(), context.selected_team_id()); }
         @Override public String toString() { return "IssuedSession[已隐藏]"; }
     }
     public record Data<T>(T data) {}

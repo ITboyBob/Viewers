@@ -1,6 +1,7 @@
-import React, { useEffect, useReducer } from 'react';
+import React, { useEffect, useReducer, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAppConfig } from '@state';
+import { DicomMetadataStore } from '@ohif/core';
 import { requiresBusinessAuth } from '../business/BusinessAuthGate';
 import ModeRoute from '@routes/Mode';
 import type { ModeDefinition, ModeRouteProps } from './Mode/Mode';
@@ -30,6 +31,67 @@ function BusinessModeRoute(props: ModeRouteProps) {
       props.servicesManager.services.businessServices?.projectRuntime
     );
   const project = runtime?.getCurrent?.();
+  const storage = props.servicesManager.services.businessServices?.taskStorage;
+  const target = new URLSearchParams(location.search).get('task_id');
+  const validTarget =
+    !target || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target);
+  const [restoreError, setRestoreError] = useState('');
+  const [attempt, retry] = useReducer(n => n + 1, 0);
+  useEffect(() => {
+    if (
+      !phaseOneMask ||
+      !target ||
+      !validTarget ||
+      !storage ||
+      !runtime ||
+      !projects ||
+      runtime.getCurrent?.()?.task_id === target
+    )
+      return;
+    const controller = new AbortController();
+    let transferred = false;
+    let scope: ReturnType<typeof DicomMetadataStore.prepareLocalImportScope> | undefined;
+    setRestoreError('');
+    void storage
+      .open(target, controller.signal)
+      .then(value => {
+        if (controller.signal.aborted) return;
+        scope = DicomMetadataStore.prepareLocalImportScope(
+          value.batch_id,
+          value.successes.map(item => item.dataset)
+        );
+        scope.activate();
+        runtime.bind(value, scope);
+        transferred = true;
+        refresh();
+      })
+      .catch(error => {
+        if (!controller.signal.aborted)
+          setRestoreError(error instanceof Error ? error.message : '任务加载失败');
+        scope?.release();
+      });
+    return () => {
+      controller.abort();
+      if (!transferred) scope?.release();
+    };
+  }, [phaseOneMask, target, validTarget, storage, runtime, projects, attempt]);
+  if (phaseOneMask && target && (!validTarget || project?.task_id !== target))
+    return (
+      <div
+        role={restoreError || !validTarget ? 'alert' : 'status'}
+        className="bg-black p-4 text-white"
+      >
+        {!validTarget ? '任务标识无效' : restoreError || '正在从后端加载任务…'}
+        {restoreError && (
+          <button
+            type="button"
+            onClick={() => retry()}
+          >
+            重试加载
+          </button>
+        )}
+      </div>
+    );
   return (
     <>
       {phaseOneMask &&

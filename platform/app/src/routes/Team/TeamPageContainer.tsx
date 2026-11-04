@@ -13,6 +13,7 @@ type Props = {
   taskStatusSlot?: React.ReactNode;
   onOpenTask?(taskId: string): void;
   canOpenTask?(taskId: string): boolean;
+  renderPreview?(taskId: string): React.ReactNode;
   openingTaskId?: string | null;
 };
 

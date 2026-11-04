@@ -1,11 +1,19 @@
+import { TextEncoder, TextDecoder } from 'util';
+Object.assign(global, { TextEncoder, TextDecoder });
 import createAdapter from './ProjectWorkspaceAdapter';
-import { cache, imageLoader } from '@cornerstonejs/core';
+import { cache, imageLoader, geometryLoader } from '@cornerstonejs/core';
 import { annotation, segmentation } from '@cornerstonejs/tools';
 jest.mock(
   '@cornerstonejs/core',
   () => ({
-    cache: { getImage: jest.fn() },
-    imageLoader: { loadAndCacheImage: jest.fn(), createAndCacheDerivedLabelmapImages: jest.fn() },
+    cache: { getImage: jest.fn(), getGeometry: jest.fn() },
+    geometryLoader: { createAndCacheGeometry: jest.fn().mockResolvedValue({}) },
+    Enums: { GeometryType: { CONTOUR: 'CONTOUR' } },
+    imageLoader: {
+      loadAndCacheImage: jest.fn(),
+      createAndCacheDerivedLabelmapImages: jest.fn(),
+      createAndCacheDerivedImages: jest.fn(),
+    },
   }),
   { virtual: true }
 );
@@ -15,6 +23,7 @@ jest.mock(
     annotation: {
       state: {
         getAllAnnotations: jest.fn(),
+        removeAnnotation: jest.fn(),
         getAnnotationManager: () => ({ addAnnotation: jest.fn() }),
       },
     },
@@ -22,12 +31,17 @@ jest.mock(
       getLabelmapImageIds: jest.fn(),
       activeSegmentation: { setActiveSegmentation: jest.fn() },
     },
-    Enums: { SegmentationRepresentations: { Labelmap: 'Labelmap' } },
+    Enums: { SegmentationRepresentations: { Labelmap: 'Labelmap', Contour: 'Contour' } },
     utilities: { triggerAnnotationRenderForViewportIds: jest.fn() },
   }),
   { virtual: true }
 );
-const project = { task_id: 'task-a', successes: [{ image_id: 'raw-a' }] } as any;
+const project = {
+  task_id: 'task-a',
+  successes: [
+    { image_id: 'raw-a', study_uid: '1.2', series_uid: '1.2.3', sop_uid: '1.2.3.4', dataset: {} },
+  ],
+} as any;
 const setup = () => {
   const pixels = new Uint8Array([0, 1, 1, 0]);
   const mask = {
@@ -257,4 +271,103 @@ test('原生测量来源缺失明确失败，不能把标注恢复伪装成成�
     '来源'
   );
   expect(document.querySelector('[role="status"]')).toBeNull();
+});
+
+test('轮廓几何及集合属性可采集和回载，不需要把轮廓错误当标签图', async () => {
+  const fixture = restorable();
+  const mask: any = {
+    segmentationId: 'contour',
+    label: '轮廓集合',
+    segments: { 1: { label: '轮廓一' } },
+    representationData: { Contour: { geometryIds: ['geometry'] } },
+  };
+  fixture.services.segmentationService.getSegmentations = () => [mask];
+  (cache.getGeometry as jest.Mock).mockReturnValue({
+    data: {
+      frameOfReferenceUID: 'frame',
+      segmentIndex: 1,
+      color: [1, 2, 3],
+      contours: [
+        {
+          points: [
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+          ],
+          type: 'CLOSED_PLANAR',
+          color: [1, 2, 3],
+        },
+      ],
+    },
+  });
+  const state: any = fixture.adapter.capture(project);
+  expect(state.segmentations[0].contour.geometryIds).toEqual(['geometry']);
+  state.annotations = [];
+  state.measurements = [];
+  await fixture.adapter.restore(project, state, new AbortController().signal);
+  expect(geometryLoader.createAndCacheGeometry).toHaveBeenCalledWith(
+    'geometry',
+    expect.objectContaining({ type: 'CONTOUR' })
+  );
+  expect(fixture.services.segmentationService.addOrUpdateSegmentation).toHaveBeenCalledWith(
+    expect.objectContaining({ representation: expect.objectContaining({ type: 'Contour' }) })
+  );
+});
+test('空成果确实回载，编码按三类分组且不保存视口可见性', async () => {
+  const fixture = setup();
+  const artifacts = await fixture.adapter.exportArtifacts!(project);
+  expect(artifacts.map(a => a.type)).toEqual(['SR', 'SEG']);
+  expect(artifacts.every(a => a.blob.type === 'application/vnd.colla.task-result')).toBe(true);
+});
+
+test('16位标签值恢复不降成8位，不截断大于255的Mask标签', async () => {
+  const { adapter } = restorable();
+  const state: any = adapter.capture(project),
+    output = new Uint16Array(4);
+  state.segmentations[0].frames[0].pixels = new Uint16Array([0, 300, 500, 0]);
+  (imageLoader.createAndCacheDerivedImages as jest.Mock).mockResolvedValue([
+    { imageId: 'wide', rows: 2, columns: 2, voxelManager: { getScalarData: () => output } },
+  ]);
+  await adapter.restore(project, state, new AbortController().signal);
+  expect([...output]).toEqual([0, 300, 500, 0]);
+  expect(imageLoader.createAndCacheDerivedImages).toHaveBeenCalledWith(['raw-a'], {
+    targetBuffer: { type: 'Uint16Array' },
+  });
+});
+
+test('只读切换关闭当前活动画笔，不触发未使用画笔的预览清理，同组只处理一次', () => {
+  const tools = {
+    Length: { mode: 'Passive', isPointNearTool: () => true },
+    Brush: { mode: 'Active' },
+    UnusedBrush: { mode: 'Disabled' },
+    WindowLevel: { mode: 'Active' },
+  };
+  const group = {
+    getToolInstances: () => tools,
+    setToolEnabled: jest.fn((name: keyof typeof tools) => {
+      tools[name].mode = 'Enabled';
+    }),
+    setToolPassive: jest.fn(),
+    hasTool: (name: string) => name === 'WindowLevel',
+    setToolActive: jest.fn(),
+  };
+  const services: any = {
+    viewportGridService: {
+      getState: () => ({
+        viewports: new Map([
+          ['a', {}],
+          ['b', {}],
+        ]),
+      }),
+    },
+    toolGroupService: { getToolGroupForViewport: () => group },
+  };
+  const adapter = createAdapter(services);
+  adapter.setReadOnly(true);
+  expect(group.setToolEnabled.mock.calls.map(call => call[0])).toEqual(['Length', 'Brush']);
+  expect(tools.Brush.mode).toBe('Enabled');
+  expect(group.setToolActive).toHaveBeenCalledTimes(1);
+  adapter.setReadOnly(false);
+  expect(group.setToolPassive).toHaveBeenCalledWith('Length');
+  expect(group.setToolPassive).not.toHaveBeenCalledWith('UnusedBrush');
 });

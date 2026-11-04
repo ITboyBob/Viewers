@@ -14,6 +14,7 @@ export type SessionContext = {
   user: BusinessUserSummary;
   expires_at: string;
   default_team_id: string;
+  selected_team_id?: string;
   memberships: BusinessTeamMembership[];
 };
 export type IssuedBusinessSession = SessionContext & { token: string };
@@ -25,6 +26,9 @@ export interface BusinessApiFailure extends Error {
 export type BusinessRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
+  binaryBody?: Blob;
+  responseType?: 'blob';
+  timeoutMs?: number;
   signal?: AbortSignal;
   idempotencyKey?: string;
 };
@@ -41,6 +45,8 @@ export interface BusinessSession {
   register(input: BusinessCredentials): Promise<BusinessSessionSnapshot>;
   login(input: BusinessCredentials): Promise<BusinessSessionSnapshot>;
   validateCurrent(): Promise<BusinessSessionSnapshot>;
+  refreshContext?(): Promise<BusinessSessionSnapshot>;
+  selectTeam?(teamId: string): Promise<BusinessSessionSnapshot>;
   invalidate(): void;
   logout(): Promise<void>;
   getSnapshot(): BusinessSessionSnapshot;
@@ -61,6 +67,7 @@ export type InvitationView = {
   expires_at: string;
   decision: InvitationDecision;
   decided_at: string | null;
+  read_at?: string | null;
 };
 export type MemberView = BusinessUserSummary & {
   role: 'owner' | 'annotator';
@@ -70,6 +77,8 @@ export interface TeamInvitationApi {
   send(teamId: string, username: string, signal?: AbortSignal): Promise<InvitationView>;
   listMembers(teamId: string, signal?: AbortSignal): Promise<MemberView[]>;
   listNotifications(signal?: AbortSignal): Promise<InvitationView[]>;
+  unreadCount?(signal?: AbortSignal): Promise<number>;
+  markRead?(ids: string[], signal?: AbortSignal): Promise<number>;
   decide(
     id: string,
     decision: Exclude<InvitationDecision, 'pending'>,
@@ -123,6 +132,7 @@ export interface BusinessServices {
   session: BusinessSession;
   localProjects?: LocalProjects;
   tasks?: TaskApi;
+  taskStorage?: TaskStorageApi;
   projectRuntime?: ProjectRuntime;
   teamInvitations?: TeamInvitationApi;
   collaborationMock?: { forUser(user: BusinessUserSummary): CollaborationMockApi };
@@ -130,7 +140,7 @@ export interface BusinessServices {
   ui?: { renderHeader(options: { page: 'import' | 'viewer'; taskMembers?: boolean }): ReactNode };
 }
 
-/** 本地影像及project仅保存在当前页面内存，不进入业务请求或浏览器存储。 */
+/** 原始文件经任务存储服务上传，原生加载对象仍只属于当前页面。 */
 export type ImportSelection = {
   files: readonly File[];
   kind: 'files' | 'folder';
@@ -161,6 +171,9 @@ export type ImportBatch = {
 };
 export type LocalProject = ImportBatch & {
   readonly importer_uid: string;
+  readonly viewer_uid?: string;
+  can_edit?: boolean;
+  source_stored?: boolean;
   readonly team_id: string;
   readonly title: string;
   readonly registration_key: string;
@@ -189,6 +202,11 @@ export interface LocalProjects {
   suspend(): void;
   disposeAll(): void;
   getSelection(project: LocalProject): ImportSelection | undefined;
+  restoreStored?(
+    materials: TaskMaterials,
+    selection: ImportSelection,
+    signal?: AbortSignal
+  ): Promise<LocalProject>;
   setWorkspaceState(project: LocalProject, state: unknown): void;
   getWorkspaceState(project: LocalProject): unknown;
 }
@@ -215,8 +233,17 @@ export type ProjectModeLifecycle = { setNativeExit(exit: () => void): () => void
 export interface ProjectWorkspaceAdapter {
   capture(project: LocalProject): unknown;
   restore(project: LocalProject, state: unknown, signal: AbortSignal): Promise<void>;
+  isBusy?(): boolean;
+  exportArtifacts?(project: LocalProject): Promise<ResultArtifact[]>;
+  importArtifacts?(
+    project: LocalProject,
+    artifacts: ResultArtifact[],
+    signal: AbortSignal
+  ): Promise<void>;
+  setReadOnly?(readOnly: boolean): void;
 }
 export interface ProjectRuntime extends BusinessRuntime {
+  startAutoSave?(): Promise<void>;
   readonly restoringWorkspace: boolean;
   prepareSuspend(): void;
   setSnapshotAdapter(adapter: ProjectWorkspaceAdapter): void;
@@ -469,4 +496,46 @@ export interface LocalCollaborationServices {
   readonly publisher?: SharedFilePublicationPort;
   readonly sharedView?: SharedViewPort;
   participation?: LocalParticipationPort;
+}
+
+/** 后端材料与当前成果版本，文件缓存不授予身份资格。 */
+export type TaskAccess = { owner_uid: string; can_edit: boolean };
+export type SourceFileSpec = {
+  file_id: string;
+  selection_index: number;
+  file_name: string;
+  relative_path?: string;
+  size: number;
+  study_uid: string;
+  series_uid: string;
+  sop_uid: string;
+};
+export type TaskMaterials = {
+  task: BusinessTask;
+  source: {
+    registration_key: string;
+    title: string;
+    kind: 'files' | 'folder';
+    folder_name?: string;
+    mode_path: LocalProject['mode_path'];
+    files: SourceFileSpec[];
+  };
+  access: TaskAccess;
+};
+export type ResultObject = { object_id: string; type: 'SR' | 'SEG' | 'RTSTRUCT' };
+export type TaskResults = { revision: number; objects: ResultObject[]; access: TaskAccess };
+export type ResultArtifact = { type: ResultObject['type']; blob: Blob };
+export interface TaskStorageApi {
+  forgetPending?(taskId: string): void;
+  register(project: LocalProject, signal: AbortSignal): Promise<BusinessTask>;
+  open(taskId: string, signal: AbortSignal): Promise<LocalProject>;
+  results(taskId: string, signal?: AbortSignal): Promise<TaskResults>;
+  readArtifacts(taskId: string, value: TaskResults, signal: AbortSignal): Promise<ResultArtifact[]>;
+  save(
+    taskId: string,
+    baseRevision: number,
+    artifacts: ResultArtifact[],
+    operationId: string,
+    signal: AbortSignal
+  ): Promise<TaskResults>;
 }

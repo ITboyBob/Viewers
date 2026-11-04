@@ -24,6 +24,7 @@ export type TeamPageProps = {
   taskStatusSlot?: React.ReactNode;
   onOpenTask?(taskId: string): void;
   canOpenTask?(taskId: string): boolean;
+  renderPreview?(taskId: string): React.ReactNode;
   openingTaskId?: string | null;
 };
 
@@ -41,6 +42,7 @@ export default function TeamPage({
   taskStatusSlot,
   onOpenTask,
   canOpenTask,
+  renderPreview,
   openingTaskId,
 }: TeamPageProps) {
   const heading = view === 'team' ? '团队任务' : '最近任务';
@@ -194,12 +196,12 @@ export default function TeamPage({
                         onClick={() => onOpenTask?.(task.task_id)}
                       >
                         <div className="team-page-preview">
-                          <span>本地影像任务</span>
+                          {renderPreview ? renderPreview(task.task_id) : <span>本地影像任务</span>}
                         </div>
                         <div className="team-page-card-info">
                           <h3>{task.title}</h3>
                           <p>创建于 {new Date(task.created_at).toLocaleString()}</p>
-                          <p>{canOpenTask?.(task.task_id) ? '本地影像可打开' : '需重新导入影像'}</p>
+                          <p>{canOpenTask?.(task.task_id) ? '打开任务' : '当前页面未保留影像'}</p>
                         </div>
                       </button>
                     </article>

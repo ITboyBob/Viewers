@@ -78,12 +78,22 @@ export default function ModeRoute({
   const params = useParams();
   // The URL's query search parameters where the keys casing is maintained
   const incomingQuery = useSearchParams();
+  const storedProject = phaseOneMask
+    ? servicesManager.services.businessServices?.projectRuntime?.getCurrent?.()
+    : null;
+  const storedQuery = storedProject?.source_stored
+    ? new URLSearchParams(incomingQuery)
+    : incomingQuery;
+  if (storedProject?.source_stored) {
+    storedQuery.delete('StudyInstanceUIDs');
+    storedProject.study_uids.forEach(uid => storedQuery.append('StudyInstanceUIDs', uid));
+  }
   const query = sharedView
     ? new URLSearchParams([
         ...sharedView.study_uids.map(uid => ['StudyInstanceUIDs', uid]),
         ['datasources', 'dicomlocal'],
       ])
-    : incomingQuery;
+    : storedQuery;
 
   mode?.onModeInit?.({
     servicesManager,
@@ -408,7 +418,13 @@ export default function ModeRoute({
           if (exited) {
             return;
           }
-          mode?.onSetupRouteComplete?.({ servicesManager, extensionManager, commandsManager });
+          await mode?.onSetupRouteComplete?.({
+            servicesManager,
+            extensionManager,
+            commandsManager,
+          });
+          if (phaseOneMask && sharedGeneration === undefined)
+            await servicesManager.services.businessServices?.projectRuntime?.startAutoSave?.();
           const shared = servicesManager.services.businessServices?.localCollaboration;
           if (sharedGeneration !== undefined) {
             shared?.sharedView?.markSetupComplete(sharedGeneration);

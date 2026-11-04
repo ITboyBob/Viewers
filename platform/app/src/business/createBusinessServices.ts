@@ -4,6 +4,7 @@ import type { BusinessConfiguration, BusinessServices } from '@ohif/core';
 import { BusinessApiClient } from './BusinessApiClient';
 import { LocalProjectService } from './LocalProjectService';
 import { TaskService } from './TaskService';
+import { TaskStorageService } from './TaskStorageService';
 import { TeamPageService } from './TeamPageService';
 import { ProjectRuntimeService } from './ProjectRuntimeService';
 import { BusinessSessionService } from './BusinessSessionService';
@@ -66,24 +67,31 @@ export function createBusinessServices(
   const localProjects = new LocalProjectService(session, {
     identityGeneration: () => identityGeneration,
   });
-  const tasks = new TaskService(api, localProjects);
-  const projectRuntime = new ProjectRuntimeService(localProjects, tasks, project => {
-    const participant = services.localCollaboration?.participation;
-    if (
-      participant?.identity.role === 'source' &&
-      participant.identity.task_id === project.task_id
-    ) {
-      participant.close(
-        session.getSnapshot().status === 'invalid' ? 'identity_invalid' : 'source_invalid'
-      );
-    }
-    services.localCollaboration?.publisher?.cancel(project);
-  });
+  const taskStorage = new TaskStorageService(api, localProjects, session);
+  const tasks = new TaskService(api, localProjects, taskStorage);
+  const projectRuntime = new ProjectRuntimeService(
+    localProjects,
+    tasks,
+    project => {
+      const participant = services.localCollaboration?.participation;
+      if (
+        participant?.identity.role === 'source' &&
+        participant.identity.task_id === project.task_id
+      ) {
+        participant.close(
+          session.getSnapshot().status === 'invalid' ? 'identity_invalid' : 'source_invalid'
+        );
+      }
+      services.localCollaboration?.publisher?.cancel(project);
+    },
+    taskStorage
+  );
   const services: BusinessServices = {
     api,
     session,
     localProjects,
     tasks,
+    taskStorage,
     projectRuntime,
     teamInvitations: new TeamInvitationService(api),
   };

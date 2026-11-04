@@ -52,7 +52,18 @@ public class SessionService {
     }
     public SessionContext context(SessionPrincipal principal) {
         var user = identities.byUid(principal.uid()).filter(a -> a.status().equals("active")).orElseThrow(ApiException::unauthorized);
-        return new SessionContext(user.summary(), principal.expiresAt(), identities.defaultTeam(user.uid()), identities.memberships(user.uid()));
+        return new SessionContext(user.summary(), principal.expiresAt(), identities.defaultTeam(user.uid()), identities.memberships(user.uid()), selectedTeam(user.uid()));
+    }
+    private String selectedTeam(String uid) {
+        return jdbc.query("SELECT p.team_id FROM workspace_preference p JOIN team_member m ON m.team_id=p.team_id AND m.uid=p.uid WHERE p.uid=?",
+            (r,n) -> r.getString(1), uid).stream().findFirst().orElseGet(() -> identities.defaultTeam(uid));
+    }
+    @Transactional
+    public SessionContext selectTeam(SessionPrincipal principal, String team) {
+        if (team == null || !identities.memberships(principal.uid()).stream().anyMatch(m -> m.team_id().equals(team)))
+            throw new ApiException(org.springframework.http.HttpStatus.NOT_FOUND, "NOT_FOUND", "团队不存在或无权访问");
+        jdbc.update("MERGE INTO workspace_preference(uid,team_id) KEY(uid) VALUES(?,?)", principal.uid(), team);
+        return context(principal);
     }
     @Transactional
     public String revoke(String token) {
@@ -69,6 +80,6 @@ public class SessionService {
         var now = clock.instant(); var expires = now.plus(Duration.ofHours(8));
         jdbc.update("INSERT INTO auth_session(token_hash,uid,created_at,expires_at) VALUES(?,?,?,?)", digest(token), uid, IdentityRepository.utc(now), IdentityRepository.utc(expires));
         var user = identities.byUid(uid).filter(a -> a.status().equals("active")).orElseThrow(ApiException::unauthorized);
-        return new IssuedSession(token, new SessionContext(user.summary(), expires, identities.defaultTeam(uid), identities.memberships(uid)));
+        return new IssuedSession(token, new SessionContext(user.summary(), expires, identities.defaultTeam(uid), identities.memberships(uid), selectedTeam(uid)));
     }
 }

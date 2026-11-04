@@ -6,7 +6,11 @@ export type MaskOperationStatus = {
   message: string;
 };
 
+let applying = false;
+export const isMaskOperationActive = () => applying;
+
 export function reportMaskOperation(phase: MaskOperationStatus['phase'], message: string) {
+  applying = phase === 'start' || phase === 'progress';
   eventTarget.dispatchEvent(
     new CustomEvent<MaskOperationStatus>(MASK_OPERATION_EVENT, {
       detail: { phase, message },

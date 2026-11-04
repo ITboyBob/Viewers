@@ -51,7 +51,12 @@ export class BusinessApiClient implements BusinessApi {
 
     const token = this.options.getToken?.() ?? null;
     const revision = this.options.getRevision?.() ?? 0;
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    const headers: Record<string, string> = {
+      Accept: options.responseType === 'blob' ? 'application/octet-stream' : 'application/json',
+    };
+    if (options.binaryBody !== undefined && options.body !== undefined)
+      throw new BusinessApiError(422, 'INVALID_BODY', '请求载荷不能同时使用JSON和二进制');
+    if (options.binaryBody !== undefined) headers['Content-Type'] = 'application/octet-stream';
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
@@ -65,17 +70,22 @@ export class BusinessApiClient implements BusinessApi {
     const cancel = () => controller.abort();
     options.signal?.addEventListener('abort', cancel, { once: true });
     let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, this.options.timeoutMs ?? 15000);
+    const timeout = setTimeout(
+      () => {
+        timedOut = true;
+        controller.abort();
+      },
+      options.timeoutMs ?? this.options.timeoutMs ?? 15000
+    );
     try {
       const transport = this.options.fetch ?? globalThis.fetch.bind(globalThis);
       const response = await transport(url.pathname + url.search, {
         method: options.method ?? 'GET',
         headers,
         credentials: 'omit',
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        body:
+          options.binaryBody ??
+          (options.body === undefined ? undefined : JSON.stringify(options.body)),
         signal: controller.signal,
       });
       if (
@@ -88,6 +98,7 @@ export class BusinessApiClient implements BusinessApi {
       if (response.status === 204 && response.ok) {
         return undefined as T;
       }
+      if (response.ok && options.responseType === 'blob') return (await response.blob()) as T;
       const data: unknown = await response.json().catch(() => {
         throw new BusinessApiError(response.status, 'INVALID_RESPONSE', '服务响应无法解析，请重试');
       });
