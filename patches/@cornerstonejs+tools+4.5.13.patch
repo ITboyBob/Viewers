@@ -289,6 +289,57 @@ diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Label
 +    labelmapActor.modified();
 +    labelmapActor.getProperty().modified();
 +    labelmapActor.getMapper().modified();
-     const visible = isActiveLabelmap || renderInactiveSegmentations;
+-    const visible = isActiveLabelmap || renderInactiveSegmentations;
++    const visible = segmentationRepresentation.visible !== false && (isActiveLabelmap || renderInactiveSegmentations);
      labelmapActor.setVisibility(visible);
  }
+diff --git a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/surfaceDisplay.js b/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/surfaceDisplay.js
+--- a/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/surfaceDisplay.js
++++ b/node_modules/@cornerstonejs/tools/dist/esm/tools/displayTools/Surface/surfaceDisplay.js
+@@ -63,7 +63,7 @@
+         const surface = geometry.data;
+         const color = colorLUT[segmentIndex];
+         surface.color = color.slice(0, 3);
+-        surface.visible = !isHidden;
++        surface.visible = representation.visible !== false && !isHidden;
+         surfaces.push(surface);
+         addOrUpdateSurfaceToElement(viewport.element, surface, segmentationId);
+     });
+diff --git a/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/SegmentationRenderingEngine.js b/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/SegmentationRenderingEngine.js
+--- a/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/SegmentationRenderingEngine.js
++++ b/node_modules/@cornerstonejs/tools/dist/esm/stateManagement/segmentation/SegmentationRenderingEngine.js
+@@ -28,18 +28,14 @@
+         this._renderFlaggedSegmentations = () => {
+             this._throwIfDestroyed();
+             const viewportIds = Array.from(this._needsRender);
++            this._needsRender.clear();
++            this._animationFrameSet = false;
++            this._animationFrameHandle = null;
+             viewportIds.forEach((viewportId) => {
+                 this._triggerRender(viewportId);
+             });
+-            this._needsRender.clear();
+-            this._animationFrameSet = false;
+-            this._animationFrameHandle = null;
+-            if (this._pendingRenderQueue.length > 0) {
+-                const nextViewportIds = this._pendingRenderQueue.shift();
+-                if (nextViewportIds && nextViewportIds.length > 0) {
+-                    this._setViewportsToBeRenderedNextFrame(nextViewportIds);
+-                }
+-            }
++            // Coalesce reentrant requests into the next frame instead of replaying an old FIFO.
++            this._render();
+         };
+     }
+     renderSegmentationsForViewport(viewportId) {
+@@ -78,10 +74,6 @@
+         }
+     }
+     _setViewportsToBeRenderedNextFrame(viewportIds) {
+-        if (this._animationFrameSet) {
+-            this._pendingRenderQueue.push(viewportIds);
+-            return;
+-        }
+         viewportIds.forEach((viewportId) => {
+             this._needsRender.add(viewportId);
+         });

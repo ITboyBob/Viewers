@@ -3,6 +3,54 @@ const { test } = require('node:test'),
 const {
   refineMask,
 } = require('../../extensions/cornerstone/src/utils/maskEditing/refinementAlgorithms.ts');
+test('boolean operations implement overlap truth tables and protect occupied labels', () => {
+  const state = Uint8Array.from([1, 1, 0, 0, 2]),
+    operandMask = Uint8Array.from([1, 0, 1, 0, 1]);
+  for (const [booleanOperation, expected] of [
+    ['union', [1, 1, 1, 0, 0]],
+    ['intersection', [1, 0, 0, 0, 0]],
+    ['difference', [0, 1, 0, 0, 0]],
+  ])
+    assert.deepEqual(
+      [
+        ...refineMask(state, [5, 1, 1], [1, 1, 1], {
+          operation: 'boolean',
+          booleanOperation,
+          operandMask,
+        }).mask,
+      ],
+      expected
+    );
+  assert.throws(() =>
+    refineMask(state, [5, 1, 1], [1, 1, 1], {
+      operation: 'boolean',
+      booleanOperation: 'union',
+      operandMask: new Uint8Array(1),
+    })
+  );
+});
+test('3D plane clipping respects oblique index coefficients and keeps boundary voxels on either side', () => {
+  const state = new Uint8Array(27).fill(1);
+  const positive = refineMask(state, [3, 3, 3], [1, 1, 2], {
+    operation: 'cut',
+    cutPlane: { normal: [1, 0, 2], offset: 3, keepPositive: true },
+  }).mask;
+  const negative = refineMask(state, [3, 3, 3], [1, 1, 2], {
+    operation: 'cut',
+    cutPlane: { normal: [1, 0, 2], offset: 3, keepPositive: false },
+  }).mask;
+  for (let i = 0; i < 27; i++) {
+    const distance = (i % 3) + 2 * Math.floor(i / 9) - 3;
+    assert.equal(positive[i], Number(distance >= 0));
+    assert.equal(negative[i], Number(distance <= 0));
+  }
+  assert.throws(() =>
+    refineMask(state, [3, 3, 3], [1, 1, 2], {
+      operation: 'cut',
+      cutPlane: { normal: [0, 0, 0], offset: 0, keepPositive: true },
+    })
+  );
+});
 
 function brute(state, dims, spacing, operation, radius) {
   const pad = dims.map((n, i) => (n === 1 ? 0 : Math.ceil(radius / spacing[i]) * 3 + 1));
@@ -194,4 +242,143 @@ test('all refinement operations report bounded monotonic progress without changi
       values.every((value, i) => value >= 0 && value <= 1 && (!i || value >= values[i - 1]))
     );
   }
+});
+test('HU grow traverses only eligible six-connected voxels and additive mode preserves prior manual labels', () => {
+  const state = Uint8Array.from([0, 0, 2, 1, 0, 0, 0, 0]),
+    eligibility = Uint8Array.from([1, 1, 1, 0, 1, 0, 0, 1]);
+  const replace = refineMask(state, [4, 1, 2], [1, 1, 2], {
+    operation: 'huGrow',
+    seed: [0, 0, 0],
+    eligibility,
+    replace: true,
+  }).mask;
+  assert.deepEqual([...replace], [1, 1, 0, 0, 1, 0, 0, 0]);
+  const append = refineMask(state, [4, 1, 2], [1, 1, 2], {
+    operation: 'huGrow',
+    seed: [0, 0, 0],
+    eligibility,
+    replace: false,
+  }).mask;
+  assert.equal(append[3], 1);
+  assert.equal(append[2], 0);
+  assert.throws(
+    () =>
+      refineMask(state, [4, 1, 2], [1, 1, 2], {
+        operation: 'huGrow',
+        seed: [2, 0, 0],
+        eligibility,
+      }),
+    /已着色/
+  );
+});
+test('HU grow starts from an empty Mask and rejects inconsistent candidates', () => {
+  const state = new Uint8Array(4),
+    eligibility = Uint8Array.from([1, 0, 1, 0]);
+  assert.deepEqual(
+    [
+      ...refineMask(state, [2, 1, 2], [1, 1, 2], {
+        operation: 'huGrow',
+        seed: [0, 0, 0],
+        eligibility,
+      }).mask,
+    ],
+    [1, 0, 1, 0]
+  );
+  assert.throws(() =>
+    refineMask(state, [2, 1, 2], [1, 1, 2], {
+      operation: 'huGrow',
+      seed: [0, 0, 0],
+      eligibility: new Uint8Array(1),
+    })
+  );
+});
+test('keyframe interpolation fills identical contours and preserves endpoints and other masks', () => {
+  const dims = [5, 5, 5],
+    plane = 25,
+    state = new Uint8Array(125);
+  for (const z of [0, 4])
+    for (let y = 1; y <= 3; y++) for (let x = 1; x <= 3; x++) state[z * plane + y * 5 + x] = 1;
+  state[2 * plane + 12] = 2;
+  const result = refineMask(state, dims, [0.7, 1.2, 3], {
+    operation: 'interpolate',
+    startSlice: 1,
+    endSlice: 5,
+  }).mask;
+  for (let z = 0; z < 5; z++)
+    for (let y = 0; y < 5; y++)
+      for (let x = 0; x < 5; x++) {
+        const i = z * plane + y * 5 + x;
+        assert.equal(result[i], state[i] === 2 ? 0 : Number(x >= 1 && x <= 3 && y >= 1 && y <= 3));
+      }
+  assert.equal(state[25 + 12], 0, 'input snapshot must stay intact');
+});
+test('interpolation skips already annotated intermediate layers unless explicitly replaced', () => {
+  const state = new Uint8Array(5 * 5 * 5);
+  for (const z of [0, 4])
+    for (let y = 1; y <= 3; y++) for (let x = 1; x <= 3; x++) state[z * 25 + y * 5 + x] = 1;
+  state[2 * 25] = 1;
+  const skipped = refineMask(state, [5, 5, 5], [1, 1, 2], {
+    operation: 'interpolate',
+    startSlice: 1,
+    endSlice: 5,
+  }).mask;
+  assert.deepEqual([...skipped.subarray(50, 75)], [...state.subarray(50, 75)]);
+  const replaced = refineMask(state, [5, 5, 5], [1, 1, 2], {
+    operation: 'interpolate',
+    startSlice: 1,
+    endSlice: 5,
+    replaceIntermediate: true,
+  }).mask;
+  assert.equal(replaced[50], 0);
+  assert.equal(replaced[62], 1);
+  for (const [startSlice, endSlice] of [
+    [1, 2],
+    [0, 5],
+    [1, 6],
+  ])
+    assert.throws(() =>
+      refineMask(state, [5, 5, 5], [1, 1, 2], { operation: 'interpolate', startSlice, endSlice })
+    );
+  state.fill(0, 100);
+  assert.throws(
+    () =>
+      refineMask(state, [5, 5, 5], [1, 1, 2], {
+        operation: 'interpolate',
+        startSlice: 1,
+        endSlice: 5,
+      }),
+    /关键层/
+  );
+});
+test('interpolation between different shapes matches independent physical signed-distance blending', () => {
+  const dims = [7, 7, 5],
+    p = 49,
+    spacing = [0.6, 1.4, 3],
+    state = new Uint8Array(p * 5);
+  for (let y = 1; y <= 5; y++) for (let x = 1; x <= 5; x++) state[y * 7 + x] = 1;
+  for (let y = 2; y <= 4; y++) for (let x = 3; x <= 5; x++) state[4 * p + y * 7 + x] = 1;
+  function signed(layer, x, y) {
+    let fg = Infinity,
+      bg = Infinity;
+    for (let j = -1; j <= 7; j++)
+      for (let i = -1; i <= 7; i++) {
+        const selected = i >= 0 && i < 7 && j >= 0 && j < 7 && state[layer * p + j * 7 + i] === 1;
+        const d = Math.hypot((x - i) * spacing[0], (y - j) * spacing[1]);
+        if (selected) fg = Math.min(fg, d);
+        else bg = Math.min(bg, d);
+      }
+    return bg - fg;
+  }
+  const actual = refineMask(state, dims, spacing, {
+    operation: 'interpolate',
+    startSlice: 1,
+    endSlice: 5,
+  }).mask;
+  for (let z = 1; z < 4; z++)
+    for (let y = 0; y < 7; y++)
+      for (let x = 0; x < 7; x++)
+        assert.equal(
+          actual[z * p + y * 7 + x],
+          Number(signed(0, x, y) * (1 - z / 4) + (signed(4, x, y) * z) / 4 > 0)
+        );
 });

@@ -49,6 +49,7 @@ globalThis.__volumeMaskSdk = {
   eventTarget: { dispatchEvent: () => true },
   utilities: {
     transformWorldToIndex: (_, point) => point,
+    transformIndexToWorld: (_, point) => [point[0], point[1], point[2] * fixture.volume.spacing[2]],
     uuidv4: () => `whole-operation-${++nextIdentity}`,
     HistoryMemo: { DefaultHistoryMemo: { push: memo => history.push(memo) } },
   },
@@ -68,6 +69,8 @@ const hooks = registerHooks({
   resolve(specifier, context, next) {
     if (specifier === './createMaskProjectCommands')
       return { url: 'volume-mask:project-commands', shortCircuit: true };
+    if (specifier === './createMaskVisibilityCommands')
+      return { url: 'volume-mask:visibility-commands', shortCircuit: true };
     if (specifier === '@cornerstonejs/core') return { url: 'volume-mask:core', shortCircuit: true };
     if (specifier === '@cornerstonejs/tools')
       return { url: 'volume-mask:tools', shortCircuit: true };
@@ -80,6 +83,7 @@ const hooks = registerHooks({
         './createMaskRefinementCommands',
         './refinementAlgorithms',
         './maskRefinementEvents',
+        './maskHistory',
       ].includes(specifier)
     )
       return next(`${specifier}.ts`, context);
@@ -88,12 +92,14 @@ const hooks = registerHooks({
   load(url, context, next) {
     if (url === 'volume-mask:project-commands')
       return { format: 'module', shortCircuit: true, source: 'export default () => ({})' };
+    if (url === 'volume-mask:visibility-commands')
+      return { format: 'module', shortCircuit: true, source: 'export default () => ({})' };
     if (url === 'volume-mask:core')
       return {
         format: 'module',
         shortCircuit: true,
         source:
-          'export const {StackViewport,VolumeViewport,cache,imageLoader,eventTarget,utilities}=globalThis.__volumeMaskSdk; export const metaData={get:()=>undefined}; export const Types={};',
+          'export const {StackViewport,VolumeViewport,cache,imageLoader,eventTarget,utilities}=globalThis.__volumeMaskSdk; export const metaData={get:(_,id)=>globalThis.__volumeMaskSdk.metadata?.(id)}; export const Types={};',
       };
     if (url === 'volume-mask:tools')
       return {
@@ -134,6 +140,7 @@ function setup(
     })
   );
   fixture = { pixels, active, locked: false, segmentIndex: 1 };
+  fixture.displaySet = { isReconstructable: true };
   fixture.volume = {
     dimensions: [2, 1, 2],
     spacing: [1, 1, 2],
@@ -171,7 +178,7 @@ function setup(
           getActiveViewportId: () => 'viewport',
           getDisplaySetsUIDsForViewport: () => ['case'],
         },
-        displaySetService: { getDisplaySetByUID: () => ({ isReconstructable: true }) },
+        displaySetService: { getDisplaySetByUID: () => fixture.displaySet },
         cornerstoneViewportService: { getCornerstoneViewport: () => new StackViewport() },
         segmentationService: {
           getActiveSegmentation: () => active,
@@ -864,5 +871,128 @@ test('cancellation at final progress cannot publish a preview, and a published p
     assert.equal(history.length, 0);
   } finally {
     globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = previousDispatch;
+  }
+});
+test('ROI morphology preserves outside labels and refuses an outdated ROI snapshot', async () => {
+  const {
+    maskRoiSettings,
+  } = require('../../extensions/cornerstone/src/utils/maskEditing/maskRoi.ts');
+  const f = setup([
+      [1, 0],
+      [0, 0],
+    ]),
+    roi = {
+      seriesInstanceUID: 'series',
+      axes: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      min: [0, 0, 0],
+      max: [1, 0, 0],
+    };
+  globalThis.__volumeMaskSdk.metadata = () => ({ SeriesInstanceUID: 'series' });
+  // Existing display set fixture only requires a source image identity for ROI resolution.
+  fixture.displaySet.imageIds = ['ref-0', 'ref-1'];
+  maskRoiSettings.set('series', roi);
+  try {
+    let { preview } = await f.commands.previewMaskRefinement({
+      operation: 'dilate',
+      radiusMm: 3,
+      useRoi: true,
+    });
+    assert.equal(preview.added, 1);
+    await f.commands.applyMaskRefinement({ previewId: preview.id });
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 1],
+        [0, 0],
+      ]
+    );
+    history[0].restoreMemo(true);
+    ({ preview } = await f.commands.previewMaskRefinement({
+      operation: 'dilate',
+      radiusMm: 3,
+      useRoi: true,
+    }));
+    maskRoiSettings.set('series', { ...roi, max: [0, 0, 0] });
+    await assert.rejects(f.commands.applyMaskRefinement({ previewId: preview.id }), /ROI 已改变/);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 0],
+      ]
+    );
+  } finally {
+    maskRoiSettings.clear();
+    delete globalThis.__volumeMaskSdk.metadata;
+  }
+});
+test('HU grow resolves source geometry and applies rescale exactly once for raw or pre-scaled pixels', async () => {
+  try {
+    for (const scaled of [false, true]) {
+      const f = setup(
+        [
+          [0, 0],
+          [0, 0],
+        ],
+        scaled
+          ? [
+              [100, -1000],
+              [100, -1000],
+            ]
+          : [
+              [1100, 0],
+              [1100, 0],
+            ]
+      );
+      fixture.displaySet.imageIds = ['ref-0', 'ref-1'];
+      fixture.volume.imageData.worldToIndex = point => [point[0], point[1], point[2] / 2];
+      globalThis.__volumeMaskSdk.metadata = id => ({
+        SeriesInstanceUID: 'series',
+        NumberOfFrames: 1,
+        Rows: 1,
+        Columns: 2,
+        ImagePositionPatient: [0, 0, id === 'ref-1' ? 2 : 0],
+        ImageOrientationPatient: [1, 0, 0, 0, 1, 0],
+        PixelSpacing: [1, 1],
+      });
+      for (const id of ['ref-0', 'ref-1'])
+        Object.assign(images.get(id), { isPreScaled: scaled, slope: 1, intercept: -1000 });
+      const { preview } = await f.commands.previewMaskRefinement({
+        operation: 'huGrow',
+        lower: 50,
+        upper: 150,
+        worldPoint: [0, 0, 0],
+      });
+      assert.equal(preview.added, 2);
+      assert.deepEqual(
+        f.pixels.map(v => [...v]),
+        [
+          [0, 0],
+          [0, 0],
+        ]
+      );
+      await f.commands.applyMaskRefinement({ previewId: preview.id });
+      assert.deepEqual(
+        f.pixels.map(v => [...v]),
+        [
+          [1, 0],
+          [1, 0],
+        ]
+      );
+      history[0].restoreMemo(true);
+      assert.deepEqual(
+        f.pixels.map(v => [...v]),
+        [
+          [0, 0],
+          [0, 0],
+        ]
+      );
+    }
+  } finally {
+    delete globalThis.__volumeMaskSdk.metadata;
   }
 });

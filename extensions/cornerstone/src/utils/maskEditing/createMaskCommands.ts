@@ -8,6 +8,8 @@ import {
 } from '@cornerstonejs/core';
 import { roiSelection } from './maskRoi';
 import type { MaskRoi } from './maskRoi';
+import { describeHistoryMemo } from './maskHistory';
+import type { MaskHistoryDetail } from './maskHistory';
 import { segmentation, utilities as toolUtilities } from '@cornerstonejs/tools';
 import {
   createSliceMapping,
@@ -196,7 +198,8 @@ export default function createMaskCommands({
   function commit(
     slice: ReturnType<typeof getSlice>,
     result: Uint32Array,
-    created: CreatedSegment[] = []
+    created: CreatedSegment[] = [],
+    detail: Partial<MaskHistoryDetail> = {}
   ) {
     const { segmentationId, segmentIndex, voxelManager, mapping, pixels } = slice;
     let changed = 0;
@@ -238,6 +241,14 @@ export default function createMaskCommands({
         segmentationService.setActiveSegment(segmentationId, segmentIndex);
       };
     }
+    describeHistoryMemo(memo, {
+      title: '当前切片编辑',
+      segmentationId,
+      segmentIndex,
+      changed,
+      target: `${slice.active.label || '标注集'} / ${slice.segment.label || 'Mask'}`,
+      ...detail,
+    });
     utilities.HistoryMemo.DefaultHistoryMemo.push(memo);
     segmentationService.setActiveSegment(segmentationId, segmentIndex);
     segmentation.triggerSegmentationEvents.triggerSegmentationDataModified(segmentationId);
@@ -272,14 +283,22 @@ export default function createMaskCommands({
         replace,
         selection
       );
-      const changed = commit(slice, result);
+      const changed = commit(slice, result, [], {
+        title: '单片阈值',
+        parameters: {
+          '下限 HU': lower,
+          '上限 HU': upper,
+          模式: replace ? '替换' : '追加',
+          范围: roi ? 'ROI' : '当前切片',
+        },
+      });
       return { changed, message: `当前切片阈值选区完成，更新 ${changed} 个像素。` };
     },
     fillMaskHoles: () => {
       const slice = getSlice();
       const { pixels, mapping, segmentIndex } = slice;
       const result = fillHolesSlice(pixels, mapping.width, mapping.height, segmentIndex);
-      const changed = commit(slice, result);
+      const changed = commit(slice, result, [], { title: '单片填洞' });
       return {
         changed,
         message: changed
@@ -311,7 +330,10 @@ export default function createMaskCommands({
         segmentIndex: item.segmentIndex,
         label: `${slice.segment.label || 'Mask'} / ${index + 2}`,
       }));
-      const changed = commit(slice, result.pixels, created);
+      const changed = commit(slice, result.pixels, created, {
+        title: '单片拆分',
+        parameters: { 区域数: result.componentCount },
+      });
       return {
         changed,
         message: `当前切片已拆为 ${result.componentCount} 个 Mask，最大区域保留原名称。`,

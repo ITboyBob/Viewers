@@ -47,6 +47,12 @@ export default function MaskThresholdPreview({
         dot(axes[2], metaData.get('instance', id)?.ImagePositionPatient?.map(Number) || [NaN])
       )
       .sort((a, b) => a - b);
+  const canDrawRoi = Boolean(
+    axes &&
+      (viewport instanceof StackViewport ||
+        (viewport instanceof VolumeViewport &&
+          Math.abs(dot(axes[2], viewport.getCamera().viewPlaneNormal)) > 0.9999))
+  );
   const firstLayer =
     roi && positions ? positions.findIndex(value => value >= roi.min[2] - 0.0001) + 1 : 1;
   const lastLayer =
@@ -287,10 +293,11 @@ export default function MaskThresholdPreview({
         start = undefined;
         return;
       }
-      const a = viewport.canvasToWorld(start),
-        b = viewport.canvasToWorld(end);
-      const min = axes.map(axis => Math.min(dot(axis, a), dot(axis, b)));
-      const max = axes.map(axis => Math.max(dot(axis, a), dot(axis, b)));
+      const corners = [start, end, [start[0], end[1]], [end[0], start[1]]].map(point =>
+        viewport.canvasToWorld([point[0], point[1]])
+      );
+      const min = axes.map(axis => Math.min(...corners.map(point => dot(axis, point))));
+      const max = axes.map(axis => Math.max(...corners.map(point => dot(axis, point))));
       min[2] = positions[0];
       max[2] = positions.at(-1);
       setRoi({ seriesInstanceUID: first.SeriesInstanceUID, axes, min, max });
@@ -353,7 +360,7 @@ export default function MaskThresholdPreview({
       <button
         type="button"
         className="mask-action w-full"
-        disabled={busy || !enabled || !(viewport instanceof StackViewport) || !axes}
+        disabled={busy || !enabled || !canDrawRoi}
         onClick={() => {
           setDrawing(!drawing);
           setError('');
@@ -362,7 +369,7 @@ export default function MaskThresholdPreview({
         {drawing ? '取消 ROI 框选' : '框选三维 ROI'}
       </button>
       {drawing && <p>在原始切片上拖动矩形；默认贯穿整组，可再调整起止层。</p>}
-      {viewport instanceof VolumeViewport && (
+      {viewport instanceof VolumeViewport && !canDrawRoi && (
         <p className="text-gray-400">框选 ROI 请先切换“轴向优先”；已有 ROI 可在 MPR 中使用。</p>
       )}
       {roi && (
@@ -404,7 +411,7 @@ export default function MaskThresholdPreview({
             清除 ROI 限制
           </button>
           <p className="text-gray-400">
-            ROI 仅限制阈值和区域生长，范围外标注保留。层号按原始扫描方向排序。
+            阈值和区域生长使用 ROI；精修页可选择是否限制 ROI。层号按原始扫描方向排序。
           </p>
         </>
       )}

@@ -28,6 +28,12 @@ function createTools({ utilityModule, commandsManager }) {
     ],
     passive: [
       {
+        toolName: 'MaskHuGrow',
+        configuration: {
+          onSeed: options => commandsManager.run('previewMaskHuGrowFromSeed', options),
+        },
+      },
+      {
         toolName: 'MaskRegionGrow',
         configuration: {
           onSeed: options => commandsManager.run('growMaskFromSeed', options),

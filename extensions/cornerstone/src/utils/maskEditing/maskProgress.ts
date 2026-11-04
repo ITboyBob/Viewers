@@ -1,5 +1,8 @@
 import { eventTarget } from '@cornerstonejs/core';
 import { Enums, segmentation } from '@cornerstonejs/tools';
+import { MASK_ROI_EVENT } from './maskRoiStore';
+import { maskRoiSettings } from './maskRoi';
+import { metaData, cache } from '@cornerstonejs/core';
 
 export const MASK_PROGRESS_EVENT = 'OHIF_MASK_PROGRESS';
 export const maskDraftPauseReasons = new Set<string>();
@@ -100,6 +103,12 @@ export function trackMaskProgress(servicesManager, commandsManager) {
     if (!viewportId && signatures.has(id)) return;
     const signature = JSON.stringify({
       label: current.label,
+      representationVisible:
+        viewportId &&
+        segmentation.config.visibility.getSegmentationRepresentationVisibility?.(viewportId, {
+          segmentationId: id,
+          type: Enums.SegmentationRepresentations.Labelmap,
+        }),
       segments: Object.values(current.segments).map((segment: any) => {
         const style =
           viewportId &&
@@ -153,6 +162,19 @@ export function trackMaskProgress(servicesManager, commandsManager) {
     }
   };
   window.addEventListener('beforeunload', beforeUnload);
+  const roiChanged = (event: CustomEvent<{ seriesInstanceUID: string }>) => {
+    for (const item of service.getSegmentations()) {
+      if (!item.representationData.Labelmap) continue;
+      const ids: unknown = segmentation.getLabelmapImageIds(item.segmentationId);
+      const referenceId = Array.isArray(ids) && cache.getImage(ids[0])?.referencedImageId;
+      if (
+        referenceId &&
+        metaData.get('instance', referenceId)?.SeriesInstanceUID === event.detail.seriesInstanceUID
+      )
+        maskProgress.change(item.segmentationId);
+    }
+  };
+  eventTarget.addEventListener(MASK_ROI_EVENT, roiChanged);
   let stopped = false,
     running = false,
     timer: ReturnType<typeof setTimeout>;
@@ -195,6 +217,8 @@ export function trackMaskProgress(servicesManager, commandsManager) {
     eventTarget.removeEventListener(MASK_PROGRESS_EVENT, schedule);
     subscriptions.forEach(subscription => subscription.unsubscribe());
     window.removeEventListener('beforeunload', beforeUnload);
+    eventTarget.removeEventListener(MASK_ROI_EVENT, roiChanged);
+    maskRoiSettings.clear();
     window.removeEventListener('pointerdown', pointerDown, true);
     window.removeEventListener('pointerup', pointerUp, true);
     window.removeEventListener('pointercancel', pointerUp, true);

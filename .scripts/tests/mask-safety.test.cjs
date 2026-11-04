@@ -22,6 +22,8 @@ function compiled(name, dependencies = {}) {
   return module.exports;
 }
 const { MaskProgressStore, trackMaskProgress, maskProgress } = compiled('maskProgress', {
+  './maskRoiStore': { MASK_ROI_EVENT: 'roi-event' },
+  './maskRoi': { maskRoiSettings: new Map() },
   '@cornerstonejs/core': { eventTarget: new EventTarget() },
   '@cornerstonejs/tools': {
     Enums: { SegmentationRepresentations: { Labelmap: 'Labelmap' } },

@@ -9,6 +9,9 @@
 前五轮优化的详细整理见 [五轮优化详细说明](LAST_FIVE_OPTIMIZATIONS.md)。
 新增的三维形态学、连通区域清理及验证结果见 [三维精修说明](MASK_REFINEMENT_NOTES.md)。
 本次从导入到编辑、保存和导出的完整检查见 [全流程回归报告](FULL_REGRESSION_REPORT.md)。
+最新的 ROI 保存、HU 生长、插值、三维切面和重叠 Mask 布尔操作见 [纯前端流程扩展](FRONTEND_WORKFLOW_NOTES.md)。
+这轮新增流程及 22 项完整检查的结果见 [纯前端验证报告](FRONTEND_VALIDATION_REPORT.md)。
+完整项目一次保存恢复、分组工具箱与实际编辑历史见 [项目工作流说明](PROJECT_WORKFLOW_NOTES.md)。
 公开真实 CT 的验证结果与重跑方式见 [真实 DICOM 测试报告](REAL_DICOM_TEST_REPORT.md)。
 
 ---

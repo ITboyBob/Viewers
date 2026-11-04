@@ -93,6 +93,8 @@ class SegmentationService extends PubSubService {
   private _segmentationIdToColorLUTIndexMap: Map<string, number>;
   private _segmentationGroupStatsMap: Map<string, any>;
   private _projectSegmentVisibility = new Map<string, Map<number, boolean>>();
+  private _projectCollectionVisibility = new Map<string, boolean>();
+  private _preferredMaskBySeries = new Map<string, string>();
   readonly servicesManager: AppTypes.ServicesManager;
   highlightIntervalId = null;
   readonly EVENTS = EVENTS;
@@ -231,6 +233,8 @@ class SegmentationService extends PubSubService {
   }
 
   public destroy = () => {
+    this._preferredMaskBySeries.clear();
+    this._projectCollectionVisibility.clear();
     this._projectSegmentVisibility.clear();
     eventTarget.removeEventListener(
       csToolsEnums.Events.SEGMENTATION_MODIFIED,
@@ -712,7 +716,26 @@ class SegmentationService extends PubSubService {
   }
 
   public setActiveSegmentation(viewportId: string, segmentationId: string): void {
+    const key = this.maskSeriesKey(segmentationId);
+    if (key) this._preferredMaskBySeries.set(key, segmentationId);
     cstSegmentation.activeSegmentation.setActiveSegmentation(viewportId, segmentationId);
+  }
+
+  private maskSeriesKey(segmentationId: string): string | undefined {
+    const data = this.getSegmentation(segmentationId)?.representationData.Labelmap as
+      | { imageIds?: string[]; referencedImageIds?: string[]; volumeId?: string }
+      | undefined;
+    if (!data) return;
+    const volume = data.volumeId ? cache.getVolume(data.volumeId) : undefined;
+    const firstImageId = data.imageIds?.[0] || volume?.imageIds?.[0];
+    const source =
+      data.referencedImageIds?.[0] ||
+      (firstImageId && cache.getImage(firstImageId)?.referencedImageId) ||
+      volume?.referencedImageIds?.[0];
+    const instance = source && metaData.get('instance', source);
+    return instance?.StudyInstanceUID && instance?.SeriesInstanceUID
+      ? `${instance.StudyInstanceUID}:${instance.SeriesInstanceUID}`
+      : undefined;
   }
 
   /**
@@ -793,11 +816,12 @@ class SegmentationService extends PubSubService {
       this._broadcastEvent(this.EVENTS.SEGMENTATION_REPRESENTATION_MODIFIED, {
         segmentationId: specifier.segmentationId,
       });
-    else this.getSegmentations().forEach((item: cstTypes.Segmentation) =>
-      this._broadcastEvent(this.EVENTS.SEGMENTATION_REPRESENTATION_MODIFIED, {
-        segmentationId: item.segmentationId,
-      })
-    );
+    else
+      this.getSegmentations().forEach((item: cstTypes.Segmentation) =>
+        this._broadcastEvent(this.EVENTS.SEGMENTATION_REPRESENTATION_MODIFIED, {
+          segmentationId: item.segmentationId,
+        })
+      );
   };
 
   public resetToGlobalStyle = () => {
@@ -910,6 +934,27 @@ class SegmentationService extends PubSubService {
   }
 
   /** Project Mask visibility also applies to representations created by later layout changes. */
+  public setCollectionVisibilityForAllViewports(segmentationId: string, visible: boolean): void {
+    this._projectCollectionVisibility.set(segmentationId, visible);
+    this.getViewportIdsWithSegmentation(segmentationId).forEach(viewportId =>
+      this.getSegmentationRepresentations(viewportId, { segmentationId }).forEach(
+        representation => {
+          const states = Object.entries(representation.segments).map(
+            ([index, item]) => [Number(index), item.visible] as const
+          );
+          cstSegmentation.config.visibility.setSegmentationRepresentationVisibility(
+            viewportId,
+            { segmentationId, type: representation.type },
+            visible
+          );
+          states.forEach(([index, state]) =>
+            this.setSegmentVisibility(viewportId, segmentationId, index, state, representation.type)
+          );
+        }
+      )
+    );
+  }
+
   public setSegmentVisibilityForAllViewports(
     segmentationId: string,
     segmentIndex: number,
@@ -1183,11 +1228,16 @@ class SegmentationService extends PubSubService {
    * @param segmentationId - The ID of the segmentation to remove.
    */
   public remove(segmentationId: string): void {
+    for (const [key, id] of this._preferredMaskBySeries)
+      if (id === segmentationId) this._preferredMaskBySeries.delete(key);
+    this._projectCollectionVisibility.delete(segmentationId);
     this._projectSegmentVisibility.delete(segmentationId);
     cstSegmentation.state.removeSegmentation(segmentationId);
   }
 
   public removeAllSegmentations(): void {
+    this._preferredMaskBySeries.clear();
+    this._projectCollectionVisibility.clear();
     this._projectSegmentVisibility.clear();
     cstSegmentation.state.removeAllSegmentations();
   }
@@ -1433,12 +1483,38 @@ class SegmentationService extends PubSubService {
     };
 
     const addRepresentation = () => {
+      const wasEmpty =
+        Object.keys(this.getCornerstoneSegmentation(segmentationId).segments).length === 0;
       cstSegmentation.addSegmentationRepresentations(viewportId, [representation]);
+      // Cornerstone 4.5 creates Mask 1 when attaching an empty set to a new viewport.
+      // Keep a deliberately empty project collection empty across layout changes.
+      if (wasEmpty) {
+        cstSegmentation.state
+          .getViewportIdsWithSegmentation(segmentationId)
+          .forEach(id =>
+            cstSegmentation.state
+              .getSegmentationRepresentations(id, { segmentationId })
+              .forEach((item: cstTypes.SegmentationRepresentation) =>
+                Object.keys(item.segments || {}).forEach(index => delete item.segments[index])
+              )
+          );
+        cstSegmentation.updateSegmentations([{ segmentationId, payload: { segments: {} } }]);
+      }
+      if (this._projectCollectionVisibility.has(segmentationId))
+        cstSegmentation.config.visibility.setSegmentationRepresentationVisibility(
+          viewportId,
+          { segmentationId, type: representationType },
+          this._projectCollectionVisibility.get(segmentationId)
+        );
       this._projectSegmentVisibility
         .get(segmentationId)
         ?.forEach((visible, segmentIndex) =>
           this.setSegmentVisibility(viewportId, segmentationId, segmentIndex, visible)
         );
+      const key = this.maskSeriesKey(segmentationId),
+        preferred = key && this._preferredMaskBySeries.get(key);
+      if (preferred && this.getViewportIdsWithSegmentation(preferred).includes(viewportId))
+        cstSegmentation.activeSegmentation.setActiveSegmentation(viewportId, preferred);
     };
 
     if (isConverted) {
@@ -1462,7 +1538,17 @@ class SegmentationService extends PubSubService {
     segmentation: SegmentationData,
     isVolumeSegmentation: boolean
   ): Promise<void> {
+    const attachReferences = () => {
+      const data = this.getCornerstoneSegmentation(segmentation.segmentationId).representationData
+        .Labelmap as { volumeId?: string };
+      const volume = data?.volumeId ? cache.getVolume(data.volumeId) : undefined;
+      if (volume && !volume.referencedImageIds?.length) {
+        const references = volume.imageIds.map(id => cache.getImage(id)?.referencedImageId);
+        if (references.every(Boolean)) volume.referencedImageIds = references;
+      }
+    };
     if (isVolumeSegmentation) {
+      attachReferences();
       return; // Volume Labelmap on Volume Viewport is natively supported
     }
 
@@ -1470,8 +1556,13 @@ class SegmentationService extends PubSubService {
     const imageIds = getLabelmapImageIds(segmentation.segmentationId);
     const segImage = cache.getImage(imageIds[0]);
 
-    if (segImage?.FrameOfReferenceUID === frameOfReferenceUID) {
+    const reference = segImage?.referencedImageId;
+    const maskFrame =
+      segImage?.FrameOfReferenceUID ||
+      (reference && metaData.get('imagePlaneModule', reference)?.frameOfReferenceUID);
+    if (maskFrame && maskFrame === frameOfReferenceUID) {
       await convertStackToVolumeLabelmap(segmentation);
+      attachReferences();
     }
   }
 
@@ -1889,9 +1980,16 @@ class SegmentationService extends PubSubService {
   };
 
   private _onSegmentationModifiedFromSource = (
-    evt: cstTypes.EventTypes.SegmentationModifiedEventType
+    evt: cstTypes.EventTypes.SegmentationModifiedEventType | CustomEvent<{ segmentationId: string }>
   ) => {
     const { segmentationId } = evt.detail;
+    if (evt.type === csToolsEnums.Events.SEGMENTATION_REMOVED) {
+      this._projectCollectionVisibility.delete(segmentationId);
+      this._projectSegmentVisibility.delete(segmentationId);
+      for (const [key, id] of this._preferredMaskBySeries)
+        if (id === segmentationId) this._preferredMaskBySeries.delete(key);
+      this._broadcastEvent(this.EVENTS.SEGMENTATION_REMOVED, { segmentationId });
+    }
 
     this._broadcastEvent(this.EVENTS.SEGMENTATION_MODIFIED, {
       segmentationId,

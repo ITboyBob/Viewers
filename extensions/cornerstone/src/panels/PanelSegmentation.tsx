@@ -142,7 +142,7 @@ export default function PanelSegmentation({
       commandsManager.run('toggleSegmentLock', { segmentationId, segmentIndex });
     },
     onToggleSegmentationRepresentationVisibility: (segmentationId, type) => {
-      commandsManager.run('toggleSegmentationVisibility', { segmentationId, type });
+      commandsManager.run('toggleSegmentationVisibility', { segmentationId, type, allViewports });
     },
     onSegmentationDownload: segmentationId => {
       commandsManager.run('downloadSegmentation', { segmentationId });

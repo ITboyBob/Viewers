@@ -43,6 +43,7 @@ import { getUpdatedViewportsForSegmentation } from './utils/hydrationUtils';
 import { SegmentationRepresentations } from '@cornerstonejs/tools/enums';
 import createMaskCommands from './utils/maskEditing/createMaskCommands';
 import createVolumeMaskCommands from './utils/maskEditing/createVolumeMaskCommands';
+import { assertMaskHistoryTarget } from './utils/maskEditing/maskHistory';
 import { MASK_BRUSH_SIZE_EVENT } from './utils/maskEditing/maskOperationEvents';
 import {
   getCircleTool,
@@ -1570,6 +1571,7 @@ function commandsModule({
         segmentationId,
         type: Enums.SegmentationRepresentations.Labelmap,
       });
+      segmentationService.setActiveSegmentation(viewportId, segmentationId);
 
       return generatedSegmentationId;
     },
@@ -1670,8 +1672,17 @@ function commandsModule({
      * @param props.segmentationId - The ID of the segmentation
      * @param props.type - The type of representation
      */
-    toggleSegmentationVisibilityCommand: ({ segmentationId, type }) => {
+    toggleSegmentationVisibilityCommand: ({ segmentationId, type, allViewports = false }) => {
       const { segmentationService, viewportGridService } = servicesManager.services;
+      if (allViewports) {
+        const visible =
+          cornerstoneTools.segmentation.config.visibility.getSegmentationRepresentationVisibility(
+            viewportGridService.getActiveViewportId(),
+            { segmentationId, type }
+          );
+        segmentationService.setCollectionVisibilityForAllViewports(segmentationId, !visible);
+        return;
+      }
       segmentationService.toggleSegmentationRepresentationVisibility(
         viewportGridService.getActiveViewportId(),
         { segmentationId, type }
@@ -1963,10 +1974,24 @@ function commandsModule({
       viewportGridService.setDisplaySetsForViewports(viewportsToUpdate);
     },
     undo: () => {
-      DefaultHistoryMemo.undo();
+      try {
+        assertMaskHistoryTarget();
+        DefaultHistoryMemo.undo();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '无法撤销当前编辑。';
+        uiNotificationService.show({ title: '编辑历史', message, type: 'error' });
+        return { changed: 0, error: true, message };
+      }
     },
     redo: () => {
-      DefaultHistoryMemo.redo();
+      try {
+        assertMaskHistoryTarget(true);
+        DefaultHistoryMemo.redo();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '无法重做当前编辑。';
+        uiNotificationService.show({ title: '编辑历史', message, type: 'error' });
+        return { changed: 0, error: true, message };
+      }
     },
     toggleSegmentPreviewEdit: ({ toggle }) => {
       let labelmapTools = getLabelmapTools({ toolGroupService });
@@ -2694,6 +2719,15 @@ function commandsModule({
     getMaskRefinementPreviewData: actions.getMaskRefinementPreviewData,
     discardMaskRefinementPreview: actions.discardMaskRefinementPreview,
     cancelMaskRefinementCalculation: actions.cancelMaskRefinementCalculation,
+    isolateCurrentMask: actions.isolateCurrentMask,
+    restoreMaskVisibility: actions.restoreMaskVisibility,
+    hasMaskVisibilitySnapshot: actions.hasMaskVisibilitySnapshot,
+    getMaskRefinementSliceContext: actions.getMaskRefinementSliceContext,
+    configureMaskHuGrow: actions.configureMaskHuGrow,
+    previewMaskHuGrowFromSeed: actions.previewMaskHuGrowFromSeed,
+    cloneCurrentMask: actions.cloneCurrentMask,
+    saveMaskWorkspace: actions.saveMaskWorkspace,
+    loadMaskWorkspace: actions.loadMaskWorkspace,
     analyzeMaskSplit: actions.analyzeMaskSplit,
     applyMaskSplit: actions.applyMaskSplit,
     locateMaskSplitRegion: actions.locateMaskSplitRegion,

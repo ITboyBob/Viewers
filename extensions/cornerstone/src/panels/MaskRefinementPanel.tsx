@@ -30,19 +30,58 @@ export default function MaskRefinementPanel({
   busy,
   visible,
   run,
+  roi,
+  toolName,
 }) {
+  const [section, setSection] = useState('morphology');
   const [operation, setOperation] = useState<RefinementOperation>('dilate');
   const [radius, setRadius] = useState('1');
   const [minimumVolume, setMinimumVolume] = useState('100');
+  const [useRoi, setUseRoi] = useState(false);
+  const [huLower, setHuLower] = useState('150'),
+    [huUpper, setHuUpper] = useState('2000');
+  const [replaceGrow, setReplaceGrow] = useState(false);
+  const [startSlice, setStartSlice] = useState(''),
+    [endSlice, setEndSlice] = useState('');
+  const [replaceIntermediate, setReplaceIntermediate] = useState(false);
+  const [booleanOperation, setBooleanOperation] = useState('union'),
+    [operand, setOperand] = useState('');
+  const [cutOffset, setCutOffset] = useState('0'),
+    [keepPositive, setKeepPositive] = useState(true);
+  const availableOperands = servicesManager.services.segmentationService
+    .getSegmentations()
+    .filter(item => item.segmentationId !== segmentationId && item.representationData.Labelmap)
+    .flatMap(item =>
+      Object.values(item.segments).map((segment: any) => ({
+        key: JSON.stringify([item.segmentationId, segment.segmentIndex]),
+        label: `${item.label} / ${segment.label}`,
+      }))
+    );
   const [preview, setPreview] = useState<MaskRefinementPreview>();
   const [task, setTask] = useState<MaskRefinementTask>();
   const [error, setError] = useState('');
   const viewport =
     servicesManager.services.cornerstoneViewportService.getCornerstoneViewport(viewportId);
+  useEffect(() => {
+    if (toolName === 'MaskHuGrow') setSection('hugrow');
+    else if (toolName === 'MaskRemoveRegion') setSection('cleanup');
+  }, [toolName]);
   function discard() {
     commandsManager.run('discardMaskRefinementPreview', { previewId: preview?.id });
     setPreview(undefined);
   }
+  useEffect(() => {
+    commandsManager.run('configureMaskHuGrow', {
+      lower: huLower.trim() ? Number(huLower) : NaN,
+      upper: huUpper.trim() ? Number(huUpper) : NaN,
+      replace: replaceGrow,
+      useRoi: Boolean(roi && useRoi),
+    });
+  }, [huLower, huUpper, replaceGrow, useRoi, Boolean(roi), commandsManager]);
+  useEffect(() => {
+    setStartSlice('');
+    setEndSlice('');
+  }, [segmentationId, segmentIndex]);
   useEffect(() => {
     const onPreview = (event: CustomEvent<{ preview?: MaskRefinementPreview }>) => {
       const value = event.detail.preview;
@@ -181,6 +220,7 @@ export default function MaskRefinementPanel({
       operation: kind,
       radiusMm: Number(radius),
       minimumVolumeMm3: Number(minimumVolume),
+      useRoi: Boolean(roi && useRoi),
     };
     if (
       ['dilate', 'erode', 'open', 'close', 'smooth'].includes(kind) &&
@@ -205,13 +245,27 @@ export default function MaskRefinementPanel({
     setError('');
     run('previewMaskRefinement', options);
   }
+  useEffect(() => {
+    discard();
+  }, [JSON.stringify(roi)]);
+  function captureSlice(end: boolean) {
+    try {
+      const context = commandsManager.run('getMaskRefinementSliceContext');
+      discard();
+      if (end) setEndSlice(String(context.slice));
+      else setStartSlice(String(context.slice));
+      setError('');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '请先选择切片窗口。');
+    }
+  }
   const number = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 2 });
   return (
     <div
       className="mt-4 space-y-3 border-t border-gray-700 pt-3"
       aria-label="三维精修与碎片清理"
     >
-      <h4>三维形态学精修</h4>
+      <h4>三维精修工具箱</h4>
       {task && (
         <div
           className="sticky top-0 z-10 space-y-2 rounded border border-gray-600 bg-gray-900 p-2 text-xs text-gray-300"
@@ -244,110 +298,485 @@ export default function MaskRefinementPanel({
           </button>
         </div>
       )}
-      <p className="mask-help">
-        处理整组当前 Mask；不受阈值 ROI 限制。其他 Mask 不会被覆盖。先预览，再应用。
-      </p>
-      <label className="mask-control-label">
-        操作
-        <select
-          aria-label="三维形态学操作"
-          className="mask-input"
-          disabled={!enabled || busy}
-          value={operation}
+      <p className="mask-help">处理当前 Mask；其他 Mask 不会被覆盖。先预览，再应用。</p>
+      <label className="flex items-start gap-2 text-xs text-gray-300">
+        <input
+          type="checkbox"
+          aria-label="精修仅处理 ROI"
+          disabled={!roi || busy}
+          checked={Boolean(roi && useRoi)}
           onChange={event => {
             discard();
-            setOperation(event.target.value as RefinementOperation);
+            setUseRoi(event.target.checked);
+          }}
+        />
+        仅处理 ROI，范围外选区保留
+      </label>
+      <p className="mask-help">
+        {roi && useRoi
+          ? '已限定 ROI。形态学参考完整邻域，只将 ROI 内变化写入。'
+          : '当前范围：完整 Mask。需要限定范围时先在“阈值”页框选 ROI。'}
+      </p>
+      <nav
+        className="mask-refinement-nav"
+        aria-label="编辑工具分组"
+      >
+        {[
+          ['morphology', '形态学'],
+          ['cleanup', '区域清理'],
+          ['hugrow', 'HU 生长'],
+          ['interpolate', '插值'],
+          ['cut', '切面'],
+          ['boolean', '布尔'],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            disabled={busy}
+            aria-label={`编辑工具组：${label}`}
+            aria-pressed={section === id}
+            onClick={() => {
+              commandsManager.run('setToolActiveToolbar', { toolName: 'WindowLevel' });
+              setSection(id);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      <div
+        hidden={section !== 'morphology'}
+        aria-label="形态学工具组"
+      >
+        <label className="mask-control-label">
+          操作
+          <select
+            aria-label="三维形态学操作"
+            className="mask-input"
+            disabled={!enabled || busy}
+            value={operation}
+            onChange={event => {
+              discard();
+              setOperation(event.target.value as RefinementOperation);
+            }}
+          >
+            {['dilate', 'erode', 'open', 'close', 'smooth'].map(kind => (
+              <option
+                key={kind}
+                value={kind}
+              >
+                {refinementLabels[kind]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="mask-help">{descriptions[operation]}</p>
+        <label className="mask-control-label">
+          邻域半径（mm）
+          <input
+            aria-label="形态学半径 mm"
+            type="number"
+            min="0.1"
+            max="10"
+            step="0.1"
+            className="mask-input"
+            disabled={!enabled || busy}
+            value={radius}
+            onChange={event => {
+              discard();
+              setRadius(event.target.value);
+            }}
+          />
+        </label>
+        <p className="mask-help">按实际体素间距计算。例如半径 1 mm、层距 5 mm 时不会跨层膨胀。</p>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy}
+          onClick={() => prepare(operation)}
+        >
+          预览三维形态学
+        </button>
+      </div>
+      <div
+        hidden={section !== 'cleanup'}
+        aria-label="cleanup 工具组"
+      >
+        <h4>三维连通区域清理</h4>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy}
+          onClick={() => prepare('largest')}
+        >
+          预览保留最大区域
+        </button>
+        <label className="mask-control-label">
+          删除体积小于（mm³）
+          <input
+            aria-label="碎片最小体积 mm3"
+            type="number"
+            min="0.001"
+            step="1"
+            className="mask-input"
+            value={minimumVolume}
+            disabled={!enabled || busy}
+            onChange={event => {
+              discard();
+              setMinimumVolume(event.target.value);
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy}
+          onClick={() => prepare('removeSmall')}
+        >
+          预览删除小碎片
+        </button>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy}
+          onClick={() => {
+            discard();
+            run(
+              'setToolActiveToolbar',
+              { toolName: 'MaskRemoveRegion' },
+              '点选删除已启用：点击当前 Mask 内的区域，先生成整组三维删除预览。'
+            );
           }}
         >
-          {['dilate', 'erode', 'open', 'close', 'smooth'].map(kind => (
-            <option
-              key={kind}
-              value={kind}
-            >
-              {refinementLabels[kind]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="mask-help">{descriptions[operation]}</p>
-      <label className="mask-control-label">
-        邻域半径（mm）
-        <input
-          aria-label="形态学半径 mm"
-          type="number"
-          min="0.1"
-          max="10"
-          step="0.1"
-          className="mask-input"
+          点选删除连通区域 · 先预览
+        </button>
+        <p className="mask-help">
+          按三维六邻接判断连通；点选会包含与点击处相连的所有层。体积恰好等于门槛的区域保留。
+        </p>
+        {error && <p className="text-xs text-red-300">{error}</p>}
+      </div>
+      <div
+        hidden={section !== 'hugrow'}
+        aria-label="hugrow 工具组"
+      >
+        <h4>HU 灰度区域生长</h4>
+        <p className="mask-help">
+          直接点原始 CT，从种子沿 HU 范围内的相邻体素生长；不必先做阈值。使用上方 ROI 范围选择。
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
+          <label>
+            HU 下限
+            <input
+              type="number"
+              className="mask-input"
+              aria-label="灰度生长 HU 下限"
+              value={huLower}
+              disabled={!enabled || busy}
+              onChange={e => {
+                discard();
+                setHuLower(e.target.value);
+              }}
+            />
+          </label>
+          <label>
+            HU 上限
+            <input
+              type="number"
+              className="mask-input"
+              aria-label="灰度生长 HU 上限"
+              value={huUpper}
+              disabled={!enabled || busy}
+              onChange={e => {
+                discard();
+                setHuUpper(e.target.value);
+              }}
+            />
+          </label>
+        </div>
+        <label className="flex gap-2 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            aria-label="灰度生长替换选区"
+            checked={replaceGrow}
+            disabled={!enabled || busy}
+            onChange={e => {
+              discard();
+              setReplaceGrow(e.target.checked);
+            }}
+          />
+          替换所选范围的当前 Mask（默认追加）
+        </label>
+        <button
+          type="button"
+          className="mask-action w-full"
           disabled={!enabled || busy}
-          value={radius}
-          onChange={event => {
+          onClick={() => {
+            const lower = Number(huLower),
+              upper = Number(huUpper);
+            if (
+              !huLower.trim() ||
+              !huUpper.trim() ||
+              !Number.isFinite(lower) ||
+              !Number.isFinite(upper) ||
+              lower > upper
+            ) {
+              setError('请填写有效的 HU 上下限。');
+              return;
+            }
             discard();
-            setRadius(event.target.value);
+            setError('');
+            commandsManager.run('configureMaskHuGrow', {
+              lower,
+              upper,
+              replace: replaceGrow,
+              useRoi: Boolean(roi && useRoi),
+            });
+            run(
+              'setToolActiveToolbar',
+              { toolName: 'MaskHuGrow' },
+              'HU 灰度生长已启用：请点选 HU 范围内的目标，先生成预览。'
+            );
           }}
-        />
-      </label>
-      <p className="mask-help">按实际体素间距计算。例如半径 1 mm、层距 5 mm 时不会跨层膨胀。</p>
-      <button
-        type="button"
-        className="mask-action w-full"
-        disabled={!enabled || busy}
-        onClick={() => prepare(operation)}
+        >
+          点选 HU 灰度生长 · 先预览
+        </button>
+      </div>
+      <div
+        hidden={section !== 'interpolate'}
+        aria-label="interpolate 工具组"
       >
-        预览三维形态学
-      </button>
-      <h4>三维连通区域清理</h4>
-      <button
-        type="button"
-        className="mask-action w-full"
-        disabled={!enabled || busy}
-        onClick={() => prepare('largest')}
-      >
-        预览保留最大区域
-      </button>
-      <label className="mask-control-label">
-        删除体积小于（mm³）
-        <input
-          aria-label="碎片最小体积 mm3"
-          type="number"
-          min="0.001"
-          step="1"
-          className="mask-input"
-          value={minimumVolume}
+        <h4>关键层插值</h4>
+        <p className="mask-help">
+          在原始切片画好两张关键层，用当前层设置起止位置；按原始体层号插值，只改中间层，关键层保持不变。
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
+          <label>
+            起始关键层
+            <input
+              type="number"
+              min="1"
+              className="mask-input"
+              aria-label="插值起始关键层"
+              value={startSlice}
+              disabled={!enabled || busy}
+              onChange={e => {
+                discard();
+                setStartSlice(e.target.value);
+              }}
+            />
+          </label>
+          <label>
+            结束关键层
+            <input
+              type="number"
+              min="1"
+              className="mask-input"
+              aria-label="插值结束关键层"
+              value={endSlice}
+              disabled={!enabled || busy}
+              onChange={e => {
+                discard();
+                setEndSlice(e.target.value);
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            className="mask-action"
+            disabled={!enabled || busy}
+            onClick={() => captureSlice(false)}
+          >
+            当前层设为起始
+          </button>
+          <button
+            type="button"
+            className="mask-action"
+            disabled={!enabled || busy}
+            onClick={() => captureSlice(true)}
+          >
+            当前层设为结束
+          </button>
+        </div>
+        <label className="flex gap-2 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            aria-label="替换已有中间层"
+            checked={replaceIntermediate}
+            disabled={!enabled || busy}
+            onChange={e => {
+              discard();
+              setReplaceIntermediate(e.target.checked);
+            }}
+          />
+          替换已有中间层（默认跳过已标注层）
+        </label>
+        <button
+          type="button"
+          className="mask-action w-full"
           disabled={!enabled || busy}
-          onChange={event => {
-            discard();
-            setMinimumVolume(event.target.value);
+          onClick={() => {
+            const a = Number(startSlice),
+              b = Number(endSlice);
+            if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b - a < 2) {
+              setError('请选两张至少间隔一层的关键层。');
+              return;
+            }
+            setError('');
+            run('previewMaskRefinement', {
+              operation: 'interpolate',
+              startSlice: a,
+              endSlice: b,
+              replaceIntermediate,
+              useRoi: Boolean(roi && useRoi),
+            });
           }}
-        />
-      </label>
-      <button
-        type="button"
-        className="mask-action w-full"
-        disabled={!enabled || busy}
-        onClick={() => prepare('removeSmall')}
+        >
+          预览关键层插值
+        </button>
+      </div>
+      <div
+        hidden={section !== 'cut'}
+        aria-label="cut 工具组"
       >
-        预览删除小碎片
-      </button>
-      <button
-        type="button"
-        className="mask-action w-full"
-        disabled={!enabled || busy}
-        onClick={() => {
-          discard();
-          run(
-            'setToolActiveToolbar',
-            { toolName: 'MaskRemoveRegion' },
-            '点选删除已启用：点击当前 Mask 内的区域，先生成整组三维删除预览。'
-          );
-        }}
+        <h4>三维切面裁剪</h4>
+        <p className="mask-help">
+          以当前切片为切面，保留一侧的整组
+          Mask。选择轴向、冠状或矢状窗口可改变切面方向；先看删除预览。
+        </p>
+        <label className="mask-control-label">
+          切面偏移（mm）
+          <input
+            type="number"
+            min="-1000"
+            max="1000"
+            className="mask-input"
+            aria-label="三维切面偏移 mm"
+            value={cutOffset}
+            disabled={!enabled || busy}
+            onChange={e => {
+              discard();
+              setCutOffset(e.target.value);
+            }}
+          />
+        </label>
+        <label className="mask-control-label">
+          保留侧
+          <select
+            className="mask-input"
+            aria-label="三维切面保留侧"
+            value={keepPositive ? 'positive' : 'negative'}
+            disabled={!enabled || busy}
+            onChange={e => {
+              discard();
+              setKeepPositive(e.target.value === 'positive');
+            }}
+          >
+            <option value="positive">法向一侧</option>
+            <option value="negative">相反一侧</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy}
+          onClick={() => {
+            if (
+              !cutOffset.trim() ||
+              !Number.isFinite(Number(cutOffset)) ||
+              Math.abs(Number(cutOffset)) > 1000
+            ) {
+              setError('切面偏移应为 -1000 至 1000 mm。');
+              return;
+            }
+            setError('');
+            run('previewMaskRefinement', {
+              operation: 'cut',
+              cutFromView: true,
+              cutOffsetMm: Number(cutOffset),
+              keepPositive,
+              useRoi: Boolean(roi && useRoi),
+            });
+          }}
+        >
+          预览三维切面裁剪
+        </button>
+      </div>
+      <div
+        hidden={section !== 'boolean'}
+        aria-label="boolean 工具组"
       >
-        点选删除连通区域 · 先预览
-      </button>
-      <p className="mask-help">
-        按三维六邻接判断连通；点选会包含与点击处相连的所有层。体积恰好等于门槛的区域保留。
-      </p>
-      {error && <p className="text-xs text-red-300">{error}</p>}
+        <h4>独立 Mask 与布尔运算</h4>
+        <p className="mask-help">
+          独立副本存于新的单 Mask 标注集，可与原始 Mask 重叠。布尔运算只改当前独立副本，来源 Mask
+          保留。
+        </p>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy}
+          onClick={() => run('cloneCurrentMask')}
+        >
+          复制当前 Mask 为独立副本
+        </button>
+        <label className="mask-control-label">
+          另一个源 Mask
+          <select
+            className="mask-input"
+            aria-label="布尔运算源 Mask"
+            disabled={!enabled || busy}
+            value={operand}
+            onChange={e => {
+              discard();
+              setOperand(e.target.value);
+            }}
+          >
+            <option value="">请选择其他标注集的 Mask</option>
+            {availableOperands.map(item => (
+              <option
+                key={item.key}
+                value={item.key}
+              >
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="mask-control-label">
+          运算
+          <select
+            className="mask-input"
+            aria-label="Mask 布尔运算"
+            disabled={!enabled || busy}
+            value={booleanOperation}
+            onChange={e => {
+              discard();
+              setBooleanOperation(e.target.value);
+            }}
+          >
+            <option value="union">并集：当前 ∪ 源</option>
+            <option value="intersection">交集：当前 ∩ 源</option>
+            <option value="difference">差集：当前 − 源</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy || !operand}
+          onClick={() => {
+            const [operandSegmentationId, operandSegmentIndex] = JSON.parse(operand);
+            setError('');
+            run('previewMaskRefinement', {
+              operation: 'boolean',
+              booleanOperation,
+              operandSegmentationId,
+              operandSegmentIndex,
+              useRoi: Boolean(roi && useRoi),
+            });
+          }}
+        >
+          预览 Mask 布尔运算
+        </button>
+      </div>
       {preview && (
         <div
           role="region"
@@ -365,6 +794,7 @@ export default function MaskRefinementPanel({
             新增 {number(preview.added)} / 删除 {number(preview.removed)} 个体素
           </p>
           <p>预计体积 {number(preview.after * preview.voxelVolumeMm3)} mm³</p>
+          <p>范围：{preview.roi ? '仅 ROI（范围外保留）' : '完整 Mask'}</p>
           {preview.before > 0 && preview.after === 0 && (
             <p className="text-amber-300">此预览将清空当前 Mask；可关闭预览调整参数。</p>
           )}

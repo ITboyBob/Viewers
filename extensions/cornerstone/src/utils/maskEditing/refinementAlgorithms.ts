@@ -6,12 +6,30 @@ export type RefinementOperation =
   | 'smooth'
   | 'largest'
   | 'removeSmall'
-  | 'removeSeed';
+  | 'removeSeed'
+  | 'huGrow'
+  | 'interpolate'
+  | 'boolean'
+  | 'cut';
+// Boolean outputs are edited only in a dedicated single-Mask labelmap.
 export type RefinementOptions = {
   operation: RefinementOperation;
   radiusMm?: number;
   minimumVolumeMm3?: number;
   seed?: number[];
+  useRoi?: boolean;
+  replace?: boolean;
+  lower?: number;
+  upper?: number;
+  startSlice?: number;
+  endSlice?: number;
+  replaceIntermediate?: boolean;
+  eligibility?: Uint8Array;
+  booleanOperation?: 'union' | 'intersection' | 'difference';
+  operandMask?: Uint8Array;
+  operandSegmentationId?: string;
+  operandSegmentIndex?: number;
+  cutPlane?: { normal: number[]; offset: number; keepPositive: boolean };
 };
 export type RefinementProgress = (completed: number, total: number) => void;
 export const MAX_REFINEMENT_VOXELS = 64 * 1024 * 1024;
@@ -32,7 +50,7 @@ function validate(state: Uint8Array, dimensions: readonly number[], spacing: rea
 }
 
 /** Exact separable squared Euclidean distance in physical units; one full float volume. */
-function distanceTransform(
+export function distanceTransform(
   mask: Uint8Array,
   dimensions: number[],
   spacing: readonly number[],
@@ -277,9 +295,104 @@ export function refineMask(
       'largest',
       'removeSmall',
       'removeSeed',
+      'huGrow',
+      'interpolate',
+      'boolean',
+      'cut',
     ].includes(options?.operation)
   )
     throw new Error('未知的 Mask 精修操作。');
+  if (options.operation === 'huGrow') {
+    const candidates = options.eligibility;
+    if (
+      !(candidates instanceof Uint8Array) ||
+      candidates.length !== state.length ||
+      candidates.some(v => v > 1)
+    )
+      throw new Error('HU 区域生长候选数据无效。');
+    const eligible = Uint8Array.from(candidates, (value, i) => (state[i] === 2 ? 0 : value));
+    const grown = componentCleaner(
+      eligible,
+      dimensions,
+      spacing,
+      { operation: 'removeSeed', seed: options.seed },
+      progress
+    );
+    // Seed deletion is used only on the private candidate copy to identify exactly the connected voxels.
+    const mask = Uint8Array.from(eligible, (value, i) =>
+      state[i] !== 2 &&
+      ((value === 1 && grown.mask[i] === 0) || (!options.replace && state[i] === 1))
+        ? 1
+        : 0
+    );
+    return {
+      mask,
+      components: undefined as number | undefined,
+      removedComponents: undefined as number | undefined,
+    };
+  }
+  if (options.operation === 'boolean') {
+    const other = options.operandMask;
+    if (
+      !(other instanceof Uint8Array) ||
+      other.length !== state.length ||
+      other.some(v => v > 1) ||
+      !['union', 'intersection', 'difference'].includes(options.booleanOperation)
+    )
+      throw new Error('布尔运算参数或源 Mask 无效。');
+    const mask = new Uint8Array(state.length),
+      plane = dimensions[0] * dimensions[1];
+    for (let i = 0; i < mask.length; i++) {
+      const a = state[i] === 1,
+        b = other[i] === 1;
+      mask[i] =
+        state[i] !== 2 &&
+        (options.booleanOperation === 'union'
+          ? a || b
+          : options.booleanOperation === 'intersection'
+            ? a && b
+            : a && !b)
+          ? 1
+          : 0;
+      if (i % plane === 0) progress?.(i, state.length);
+    }
+    progress?.(1, 1);
+    return {
+      mask,
+      components: undefined as number | undefined,
+      removedComponents: undefined as number | undefined,
+    };
+  }
+  if (options.operation === 'cut') {
+    const plane = options.cutPlane;
+    if (
+      plane?.normal?.length !== 3 ||
+      !plane.normal.every(Number.isFinite) ||
+      !Number.isFinite(plane.offset) ||
+      Math.hypot(...plane.normal) < 1e-9 ||
+      typeof plane.keepPositive !== 'boolean'
+    )
+      throw new Error('三维切面参数无效。');
+    const [w, h] = dimensions,
+      mask = new Uint8Array(state.length);
+    for (let i = 0; i < mask.length; i++) {
+      const value =
+        (i % w) * plane.normal[0] +
+        (Math.floor(i / w) % h) * plane.normal[1] +
+        Math.floor(i / (w * h)) * plane.normal[2] -
+        plane.offset;
+      mask[i] = state[i] === 1 && (plane.keepPositive ? value >= -1e-6 : value <= 1e-6) ? 1 : 0;
+      if (i % (w * h) === 0) progress?.(i, state.length);
+    }
+    progress?.(1, 1);
+    return {
+      mask,
+      components: undefined as number | undefined,
+      removedComponents: undefined as number | undefined,
+    };
+  }
+  if (options.operation === 'interpolate')
+    return interpolateSlices(state, dimensions, spacing, options, progress);
   if (
     ['dilate', 'erode', 'open', 'close', 'smooth'].includes(options.operation) &&
     (!Number.isFinite(options.radiusMm) || options.radiusMm < 0.1 || options.radiusMm > 10)
@@ -299,4 +412,69 @@ export function refineMask(
   return ['largest', 'removeSmall', 'removeSeed'].includes(options.operation)
     ? componentCleaner(state, dimensions, spacing, options, progress)
     : morphology(state, dimensions, spacing, options, progress);
+}
+
+/** Signed in-plane distances blend two explicitly chosen labelmap keyframes. */
+function interpolateSlices(
+  state: Uint8Array,
+  dimensions: readonly number[],
+  spacing: readonly number[],
+  options: RefinementOptions,
+  progress?: RefinementProgress
+) {
+  const start = options.startSlice - 1,
+    end = options.endSlice - 1;
+  if (![start, end].every(Number.isInteger) || start < 0 || end >= dimensions[2] || end - start < 2)
+    throw new Error('插值需要两张至少间隔一层的有效关键层。');
+  const [w, h] = dimensions,
+    plane = w * h,
+    dims = [w + 2, h + 2, 1];
+  const count = dims[0] * dims[1];
+  if (count > MAX_REFINEMENT_VOXELS) throw new Error('关键层尺寸超出插值上限。');
+  function signed(layer: number) {
+    const binary = new Uint8Array(count);
+    let selected = 0;
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        if (state[layer * plane + y * w + x] === 1) {
+          binary[(y + 1) * dims[0] + x + 1] = 1;
+          selected++;
+        }
+      }
+    if (!selected) throw new Error('起始和结束关键层都必须有当前 Mask 的选区。');
+    const inside = new Float32Array(count),
+      outside = new Float32Array(count);
+    distanceTransform(binary, dims, spacing, false, inside);
+    distanceTransform(binary, dims, spacing, true, outside);
+    const result = new Float32Array(plane);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const index = (y + 1) * dims[0] + x + 1;
+        result[y * w + x] = Math.sqrt(inside[index]) - Math.sqrt(outside[index]);
+      }
+    return result;
+  }
+  const first = signed(start),
+    last = signed(end);
+  const mask = Uint8Array.from(state, value => (value === 1 ? 1 : 0));
+  for (let z = start + 1; z < end; z++) {
+    const offset = z * plane;
+    if (
+      !options.replaceIntermediate &&
+      state.subarray(offset, offset + plane).some(value => value === 1)
+    ) {
+      progress?.(z - start, end - start - 1);
+      continue;
+    }
+    const weight = (z - start) / (end - start);
+    for (let i = 0; i < plane; i++)
+      if (state[offset + i] !== 2)
+        mask[offset + i] = first[i] * (1 - weight) + last[i] * weight > 0 ? 1 : 0;
+    progress?.(z - start, end - start - 1);
+  }
+  return {
+    mask,
+    components: undefined as number | undefined,
+    removedComponents: undefined as number | undefined,
+  };
 }

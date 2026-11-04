@@ -1,4 +1,6 @@
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
+import { validateRoi } from './maskRoi';
+import type { MaskRoi } from './maskRoi';
 
 export const MAX_PROJECT_VOXELS = 128 * 1024 * 1024;
 export const MAX_PROJECT_FILE_BYTES = MAX_PROJECT_VOXELS + 5 * 1024 * 1024;
@@ -28,12 +30,14 @@ export type ProjectSegment = {
 };
 export type MaskProjectManifest = {
   format: 'OHIF_MASK_PROJECT';
-  version: 1;
+  version: 1 | 2;
+  roi?: MaskRoi;
   createdAt: string;
   label: string;
   source: ProjectSource;
   segments: ProjectSegment[];
   activeSegmentIndex: number | null;
+  representationVisible?: boolean;
   labelmap: { encoding: 'uint8'; byteLength: number; sha256: string };
 };
 
@@ -101,8 +105,8 @@ export function validateProjectSource(source: ProjectSource): number {
 
 export function validateManifest(value: MaskProjectManifest): void {
   check(
-    value?.format === 'OHIF_MASK_PROJECT' && value.version === 1,
-    '不是受支持的 OHIF 标注文件（需要版本 1）。'
+    value?.format === 'OHIF_MASK_PROJECT' && [1, 2].includes(value.version),
+    '不是受支持的 OHIF 标注文件（支持版本 1 和 2）。'
   );
   check(
     text(value.label) &&
@@ -111,6 +115,15 @@ export function validateManifest(value: MaskProjectManifest): void {
     '标注文件的名称或时间无效。'
   );
   const bytes = validateProjectSource(value.source);
+  check(
+    value.representationVisible === undefined || typeof value.representationVisible === 'boolean',
+    '标注集显隐状态无效。'
+  );
+  if (value.roi !== undefined) {
+    check(value.version === 2, '含 ROI 的标注文件需要版本 2。');
+    validateRoi(value.roi);
+    check(value.roi.seriesInstanceUID === value.source.seriesInstanceUID, 'ROI 与源序列不匹配。');
+  }
   check(
     value.labelmap?.encoding === 'uint8' &&
       value.labelmap.byteLength === bytes &&
@@ -255,6 +268,8 @@ export async function maskProjectFingerprint(manifest: MaskProjectManifest, labe
         manifest.source.frameOfReferenceUID,
         frames,
         segments,
+        manifest.roi || null,
+        manifest.representationVisible ?? true,
       ])
     )
   );

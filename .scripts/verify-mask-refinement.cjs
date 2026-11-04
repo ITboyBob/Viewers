@@ -171,6 +171,7 @@ async function apply(page) {
     report.checks.push(
       'physical-radius morphology preview counts and every applied voxel match an independent spherical-neighborhood implementation; previews are read-only and undo/redo is lossless'
     );
+    await page.getByRole('button', { name: '编辑工具组：区域清理', exact: true }).click();
     for (const operation of ['largest', 'removeSmall']) {
       const options = { operation, minimumVolumeMm3: 1000 },
         expected = await reference(page, options);
@@ -257,6 +258,7 @@ async function apply(page) {
         { timeout: 30000 }
       )
       .toBe(3);
+    await page.getByRole('button', { name: '编辑工具组：形态学', exact: true }).click();
     await page.getByLabel('三维形态学操作', { exact: true }).selectOption('dilate');
     await page.getByRole('button', { name: '预览三维形态学', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Mask 精修预览', exact: true })).toBeVisible();

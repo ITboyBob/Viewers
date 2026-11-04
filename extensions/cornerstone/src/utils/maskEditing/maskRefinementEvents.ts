@@ -30,6 +30,15 @@ export type MaskRefinementPreview = {
   removedComponents?: number;
   radiusMm?: number;
   minimumVolumeMm3?: number;
+  roi?: boolean;
+  lower?: number;
+  upper?: number;
+  startSlice?: number;
+  endSlice?: number;
+  booleanOperation?: string;
+  operandLabel?: string;
+  cutOffsetMm?: number;
+  keepPositive?: boolean;
 };
 export function publishRefinementPreview(preview?: MaskRefinementPreview) {
   eventTarget.dispatchEvent(new CustomEvent(MASK_REFINEMENT_EVENT, { detail: { preview } }));

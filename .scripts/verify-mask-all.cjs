@@ -28,6 +28,8 @@ const browser = [
   ['roi-and-drafts', 'verify-mask-safety.cjs'],
   ['refinement', 'verify-mask-refinement.cjs'],
   ['refinement-cancel', 'verify-refinement-cancel.cjs'],
+  ['frontend-workflow', 'verify-mask-frontend.cjs'],
+  ['workspace-and-history', 'verify-mask-workspace.cjs'],
 ];
 const steps = [
   { name: 'unit-tests', command: process.execPath, args: units },
@@ -50,6 +52,8 @@ const steps = [
     ['real-project', 'verify-mask-project.cjs'],
     ['real-roi-and-drafts', 'verify-mask-safety.cjs'],
     ['real-refinement', 'verify-mask-refinement.cjs'],
+    ['real-frontend-workflow', 'verify-mask-frontend.cjs'],
+    ['real-workspace-and-history', 'verify-mask-workspace.cjs'],
   ].map(([name, script]) => ({
     name,
     command: process.execPath,
@@ -107,6 +111,10 @@ function run(step) {
     const folder = path.join(root, '.cache/real-dicom', key);
     if (!fs.existsSync(path.join(folder, 'provenance.json')))
       throw Error('请先运行 corepack yarn demo:real-data，获取完整真实 CT：' + key);
+    if (fs.readdirSync(folder).filter(file => file.endsWith('.dcm')).length !== count)
+      throw Error(
+        `真实 CT ${key} 的切片不完整，需要 ${count} 张，请运行 corepack yarn demo:real-data。`
+      );
   }
   const response = await fetch('http://localhost:3000/local-mask', {
     signal: AbortSignal.timeout(15000),
@@ -122,10 +130,6 @@ function run(step) {
     console.log(
       `[${i + 1}/${steps.length}] ${step.name}: ${result.passed ? 'PASS' : 'FAIL'} (${(result.elapsedMs / 1000).toFixed(1)}s)`
     );
-    if (fs.readdirSync(folder).filter(file => file.endsWith('.dcm')).length !== count)
-      throw Error(
-        `真实 CT ${key} 的切片不完整，需要 ${count} 张，请运行 corepack yarn demo:real-data。`
-      );
     if (!result.passed) console.error(result.output || result.error);
   }
   report.finishedAt = new Date().toISOString();

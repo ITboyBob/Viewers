@@ -14,6 +14,7 @@ import { reportMaskOperation } from './maskOperationEvents';
 import type { MaskSplitPreview, VolumeSplitAnalysis } from './splitMaskTypes';
 import createMaskProjectCommands from './createMaskProjectCommands';
 import createMaskRefinementCommands from './createMaskRefinementCommands';
+import createMaskVisibilityCommands from './createMaskVisibilityCommands';
 import {
   validateRoiInstance,
   roiSelectionForInstance,
@@ -22,6 +23,8 @@ import {
   maskRoiSettings,
 } from './maskRoi';
 import type { MaskRoi } from './maskRoi';
+import { describeHistoryMemo } from './maskHistory';
+import type { MaskHistoryDetail } from './maskHistory';
 
 type VoxelManager = Types.IVoxelManager<number>;
 type LabelmapData = { volumeId?: string; imageIds?: string[]; referencedImageIds?: string[] };
@@ -187,15 +190,29 @@ export default function createVolumeMaskCommands({
   type LabelmapMemo = ReturnType<
     typeof toolUtilities.segmentation.LabelmapMemo.createLabelmapMemo<number>
   >;
-  function saveHistory(segmentationId: string, memos: LabelmapMemo[]) {
+  function saveHistory(
+    segmentationId: string,
+    memos: LabelmapMemo[],
+    detail?: Partial<MaskHistoryDetail>
+  ) {
     if (!memos.length) return;
-    utilities.HistoryMemo.DefaultHistoryMemo.push({
+    const current = segmentationService.getSegmentation(segmentationId);
+    const segment = segmentationService.getActiveSegment(viewportGridService.getActiveViewportId());
+    const memo = {
       id: utilities.uuidv4(),
       operationType: 'labelmap',
       restoreMemo(isUndo = true) {
         (isUndo ? [...memos].reverse() : memos).forEach(memo => memo.restoreMemo(isUndo));
       },
+    };
+    describeHistoryMemo(memo, {
+      title: '整组 Mask 编辑',
+      segmentationId,
+      segmentIndex: segment?.segmentIndex,
+      target: `${current?.label || '标注集'} / ${segment?.label || current?.segments[segment?.segmentIndex]?.label || 'Mask'}`,
+      ...detail,
     });
+    utilities.HistoryMemo.DefaultHistoryMemo.push(memo);
     segmentation.triggerSegmentationEvents.triggerSegmentationDataModified(segmentationId);
   }
 
@@ -302,7 +319,17 @@ export default function createVolumeMaskCommands({
       ensureTarget(target);
       saveHistory(
         target.segmentationId,
-        memos.filter(memo => memo.commitMemo())
+        memos.filter(memo => memo.commitMemo()),
+        {
+          title: '整组阈值',
+          changed,
+          parameters: {
+            '下限 HU': lower,
+            '上限 HU': upper,
+            模式: replace ? '替换' : '追加',
+            范围: roi ? 'ROI' : '整组',
+          },
+        }
       );
       return {
         changed,
@@ -348,7 +375,8 @@ export default function createVolumeMaskCommands({
       ensureTarget(target);
       saveHistory(
         target.segmentationId,
-        memos.filter(memo => memo.commitMemo())
+        memos.filter(memo => memo.commitMemo()),
+        { title: '整组逐片填洞', changed }
       );
       return {
         changed,
@@ -489,7 +517,12 @@ export default function createVolumeMaskCommands({
           yieldAt = performance.now() + 20;
         }
       }
-      if (memo.commitMemo()) saveHistory(target.segmentationId, [memo]);
+      if (memo.commitMemo())
+        saveHistory(target.segmentationId, [memo], {
+          title: 'Mask 连通筛选',
+          changed,
+          parameters: { 范围: roi ? 'ROI' : '整组', 保留体素: kept },
+        });
       return {
         changed,
         message: `区域生长完成，保留 ${kept} 个连通像素，清除 ${changed} 个不连通像素。`,
@@ -635,7 +668,11 @@ export default function createVolumeMaskCommands({
           );
         segmentationService.setActiveSegment(target.segmentationId, target.segmentIndex);
       };
-      saveHistory(target.segmentationId, [memo]);
+      saveHistory(target.segmentationId, [memo], {
+        title: '整组三维拆分',
+        changed,
+        parameters: { 最小体素: plan.preview.minimumVoxels, 区域数: analysis.components.length },
+      });
       return {
         changed,
         applied: true,
@@ -678,6 +715,7 @@ export default function createVolumeMaskCommands({
   }
 
   return {
+    ...createMaskVisibilityCommands({ servicesManager }),
     ...createMaskRefinementCommands({
       servicesManager,
       exclusive,
@@ -686,6 +724,7 @@ export default function createVolumeMaskCommands({
       maskVolumeFor,
       saveHistory,
       rollback,
+      frameData,
     }),
     ...createMaskProjectCommands({ servicesManager, commandsManager }, exclusive),
     exportMaskSegmentation: ({ segmentationId }: { segmentationId?: string } = {}) =>

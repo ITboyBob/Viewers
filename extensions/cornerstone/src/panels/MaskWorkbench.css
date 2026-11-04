@@ -279,3 +279,30 @@
   font-size: 15px;
   color: #e0f0ff;
 }
+.mask-refinement-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 12px 0;
+}
+.mask-refinement-nav button {
+  border: 1px solid #3b536a;
+  border-radius: 3px;
+  padding: 7px 3px;
+  color: #b9cede;
+  background: #152a3d;
+  font-size: 12px;
+}
+.mask-refinement-nav button[aria-pressed='true'] {
+  border-color: #5db7e0;
+  background: #254c67;
+  color: #fff;
+}
+.mask-refinement-nav button:disabled {
+  opacity: 0.45;
+}
+.mask-tool-section > summary {
+  cursor: pointer;
+  color: #b9cede;
+  padding: 7px 0;
+}

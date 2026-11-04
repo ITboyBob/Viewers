@@ -96,7 +96,7 @@ module.exports = (env, argv, { SRC_DIR, ENTRY }) => {
       type: 'filesystem',
       // A patched dependency keeps its package version, so it must invalidate
       // Webpack's otherwise immutable node_modules cache explicitly.
-      version: 'mask-tools-per-mask-appearance-v5',
+      version: 'mask-workspace-rendering-v7',
       buildDependencies: {
         config: [
           __filename,

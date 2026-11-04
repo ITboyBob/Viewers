@@ -1,4 +1,5 @@
 import React from 'react';
+import { trackMaskHistory } from './utils/maskEditing/maskHistory';
 import { trackMaskProgress } from './utils/maskEditing/maskProgress';
 import * as cornerstone from '@cornerstonejs/core';
 import * as cornerstoneTools from '@cornerstonejs/tools';
@@ -94,6 +95,7 @@ const cornerstoneExtension: Types.Extensions.Extension = {
   id,
 
   onModeEnter: ({ servicesManager, commandsManager }: withAppTypes): void => {
+    unsubscriptions.push(trackMaskHistory(servicesManager));
     unsubscriptions.push(trackMaskProgress(servicesManager, commandsManager));
     const { cornerstoneViewportService, toolbarService, segmentationService } =
       servicesManager.services;

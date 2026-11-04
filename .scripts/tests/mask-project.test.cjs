@@ -17,7 +17,14 @@ const output = ts.transpileModule(
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }
 ).outputText;
-new Function('require', 'module', 'exports', output)(require, moduleObject, moduleObject.exports);
+new Function('require', 'module', 'exports', output)(
+  key =>
+    key === './maskRoi'
+      ? require('../../extensions/cornerstone/src/utils/maskEditing/maskRoi.ts')
+      : require(key),
+  moduleObject,
+  moduleObject.exports
+);
 const {
   encodeMaskProject,
   decodeMaskProject,
@@ -26,6 +33,56 @@ const {
   MAX_PROJECT_VOXELS,
   maskProjectFingerprint,
 } = moduleObject.exports;
+const testRoi = () => ({
+  seriesInstanceUID: '1.3',
+  axes: [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ],
+  min: [0, 0, 0],
+  max: [2, 2, 3],
+});
+test('collection-level visibility is serialized separately from per-Mask visibility and affects content identity', async () => {
+  const manifest = fixture();
+  manifest.version = 2;
+  const before = await maskProjectFingerprint(manifest, labels());
+  manifest.representationVisible = false;
+  assert.notEqual(await maskProjectFingerprint(manifest, labels()), before);
+  const decoded = await decodeMaskProject(await encodeMaskProject(manifest, labels()));
+  assert.equal(decoded.manifest.representationVisible, false);
+  assert.equal(decoded.manifest.segments[0].visible, true);
+  manifest.representationVisible = 'false';
+  assert.throws(() => validateManifest(manifest), /显隐/);
+});
+test('version 2 preserves ROI and remains able to decode legacy files', async () => {
+  const m = fixture();
+  m.version = 2;
+  m.roi = testRoi();
+  assert.deepEqual(
+    (await decodeMaskProject(await encodeMaskProject(m, labels()))).manifest.roi,
+    m.roi
+  );
+  assert.equal(
+    (await decodeMaskProject(await encodeMaskProject(fixture(), labels()))).manifest.version,
+    1
+  );
+});
+test('ROI is included in content identity and mismatched or malformed ROI is rejected', async () => {
+  const m = fixture();
+  m.version = 2;
+  const before = await maskProjectFingerprint(m, labels());
+  m.roi = testRoi();
+  assert.notEqual(await maskProjectFingerprint(m, labels()), before);
+  m.roi.seriesInstanceUID = '9.1';
+  assert.throws(() => validateManifest(m), /ROI/);
+  m.roi = testRoi();
+  m.roi.axes[0] = [NaN, 0, 0];
+  assert.throws(() => validateManifest(m), /ROI/);
+  m.roi = testRoi();
+  m.version = 1;
+  assert.throws(() => validateManifest(m), /版本 2/);
+});
 
 test('content identity follows SOP UIDs across reversed frame storage', async () => {
   const original = fixture(),
@@ -159,7 +216,7 @@ for (const [name, mutate] of [
   [
     'future format version',
     m => {
-      m.version = 2;
+      m.version = 3;
     },
   ],
   [

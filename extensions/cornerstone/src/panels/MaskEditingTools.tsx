@@ -15,6 +15,8 @@ import MaskProgressPanel from './MaskProgressPanel';
 import MaskThresholdPreview from './MaskThresholdPreview';
 import MaskRefinementPanel from './MaskRefinementPanel';
 import { MaskRoi, maskRoiSettings } from '../utils/maskEditing/maskRoi';
+import { MASK_ROI_EVENT, setMaskRoi } from '../utils/maskEditing/maskRoiStore';
+import MaskHistoryPanel from './MaskHistoryPanel';
 
 const stages = [
   ['threshold', '阈值'],
@@ -55,6 +57,7 @@ export default function MaskEditingTools() {
   const [roi, setRoi] = useState<MaskRoi>();
   const [busy, setBusy] = useState(false);
   const projectInput = useRef<HTMLInputElement>(null);
+  const workspaceInput = useRef<HTMLInputElement>(null);
   const [regionArmed, setRegionArmed] = useState(false);
   const [splitScope, setSplitScope] = useState('series');
   const [minimumVoxels, setMinimumVoxels] = useState('1');
@@ -91,20 +94,11 @@ export default function MaskEditingTools() {
   const buttonClass = 'mask-action';
 
   useEffect(() => {
-    if (!sourceSeries) return;
-    setRoi(current => (current?.seriesInstanceUID === sourceSeries ? current : undefined));
+    const refresh = () => setRoi(sourceSeries ? maskRoiSettings.get(sourceSeries) : undefined);
+    refresh();
+    eventTarget.addEventListener(MASK_ROI_EVENT, refresh);
+    return () => eventTarget.removeEventListener(MASK_ROI_EVENT, refresh);
   }, [sourceSeries]);
-  useEffect(() => {
-    const imageId =
-      displaySetId && displaySetService.getDisplaySetByUID(displaySetId)?.imageIds?.[0];
-    const series = imageId && metaData.get('instance', imageId)?.SeriesInstanceUID;
-    if (!series) return;
-    if (roi) maskRoiSettings.set(series, roi);
-    else maskRoiSettings.delete(series);
-    return () => {
-      maskRoiSettings.delete(series);
-    };
-  }, [roi, displaySetId, displaySetService]);
 
   useEffect(() => {
     const onStatus = (event: CustomEvent<MaskOperationStatus>) => {
@@ -123,7 +117,7 @@ export default function MaskEditingTools() {
       setTool(name);
       setRegionArmed(name === 'MaskRegionGrow');
       if (name === 'MaskRegionGrow') setStage('grow');
-      else if (name === 'MaskRemoveRegion') setStage('edit');
+      else if (name === 'MaskRemoveRegion' || name === 'MaskHuGrow') setStage('edit');
       else if (/Brush|Eraser/.test(name)) {
         setStage('edit');
         setShape(name.includes('Sphere') ? 'sphere' : 'circle');
@@ -171,7 +165,10 @@ export default function MaskEditingTools() {
         result && typeof result === 'object' && 'message' in result
           ? String(result.message)
           : successMessage;
-      setFeedback({ message, error: false });
+      setFeedback({
+        message,
+        error: Boolean(result && typeof result === 'object' && 'error' in result && result.error),
+      });
       return result;
     } catch (error) {
       setFeedback({
@@ -229,7 +226,8 @@ export default function MaskEditingTools() {
         (next !== 'edit' &&
           (/Brush|Eraser/.test(tool) ||
             tool === 'MaskRegionGrow' ||
-            tool === 'MaskRemoveRegion')) ||
+            tool === 'MaskRemoveRegion' ||
+            tool === 'MaskHuGrow')) ||
         (next !== 'grow' && tool === 'MaskRegionGrow')
       ) {
         commandsManager.run('setToolActiveToolbar', { toolName: 'WindowLevel' });
@@ -297,21 +295,23 @@ export default function MaskEditingTools() {
       ? 'threshold'
       : 'brush';
   const toolLabel =
-    tool === 'MaskRemoveRegion'
-      ? '连通区域删除 · 点选预览'
-      : tool === 'MaskRegionGrow'
-        ? '区域生长 · 点选'
-        : tool.includes('Eraser')
-          ? '橡皮擦'
-          : tool.startsWith('Threshold')
-            ? '阈值笔刷'
-            : tool.includes('Brush')
-              ? '画笔'
-              : tool === 'Pan'
-                ? '平移'
-                : tool === 'Zoom'
-                  ? '缩放'
-                  : '窗宽 / 窗位';
+    tool === 'MaskHuGrow'
+      ? 'HU 灰度生长 · 点选预览'
+      : tool === 'MaskRemoveRegion'
+        ? '连通区域删除 · 点选预览'
+        : tool === 'MaskRegionGrow'
+          ? '区域生长 · 点选'
+          : tool.includes('Eraser')
+            ? '橡皮擦'
+            : tool.startsWith('Threshold')
+              ? '阈值笔刷'
+              : tool.includes('Brush')
+                ? '画笔'
+                : tool === 'Pan'
+                  ? '平移'
+                  : tool === 'Zoom'
+                    ? '缩放'
+                    : '窗宽 / 窗位';
 
   return (
     <section
@@ -505,7 +505,7 @@ export default function MaskEditingTools() {
             preview={thresholdPreview}
             setPreview={setThresholdPreview}
             roi={roi}
-            setRoi={setRoi}
+            setRoi={value => sourceSeries && setMaskRoi(sourceSeries, value)}
             busy={busy}
           />
           <button
@@ -529,6 +529,14 @@ export default function MaskEditingTools() {
       >
         <h4>Region Grow 区域生长</h4>
         <p className="mask-help">在阈值生成的 Mask 内点选目标，保留它的三维连通区域。</p>
+        <button
+          type="button"
+          className={`${buttonClass} mb-2 w-full`}
+          disabled={!enabled || busy}
+          onClick={() => selectStage('edit')}
+        >
+          前往 HU 灰度生长 / 关键层插值
+        </button>
         {roi && (
           <p className="mask-help">
             当前 ROI 限制已启用：只筛选 ROI 内区域，范围外标注保留。可在“阈值”页清除限制。
@@ -674,6 +682,8 @@ export default function MaskEditingTools() {
           enabled={enabled && canReconstruct}
           busy={busy}
           visible={stage === 'edit'}
+          roi={roi}
+          toolName={tool}
           run={run}
         />
       </div>
@@ -857,6 +867,30 @@ export default function MaskEditingTools() {
         <div className="mask-current-tool">
           当前工具：<strong>{toolLabel}</strong>
         </div>
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={busy || !active || !segment}
+            onClick={() => run('isolateCurrentMask')}
+          >
+            只显示当前 Mask
+          </button>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={
+              busy ||
+              !active ||
+              !commandsManager.run('hasMaskVisibilitySnapshot', {
+                segmentationId: active?.segmentationId,
+              })
+            }
+            onClick={() => run('restoreMaskVisibility')}
+          >
+            恢复之前显隐
+          </button>
+        </div>
         <div className="mt-3 flex gap-2">
           <button
             type="button"
@@ -874,6 +908,41 @@ export default function MaskEditingTools() {
           >
             重做
           </button>
+        </div>
+        <MaskHistoryPanel />
+        <div className="mask-project-actions mt-3 rounded border border-gray-600 p-2">
+          <strong className="text-xs text-gray-200">完整项目 · 当前序列</strong>
+          <button
+            type="button"
+            className={`${buttonClass} mt-2 w-full`}
+            disabled={busy || !isSliceViewport || !active?.representationData.Labelmap}
+            onClick={() => run('saveMaskWorkspace')}
+          >
+            保存整个项目
+          </button>
+          <input
+            ref={workspaceInput}
+            type="file"
+            accept=".ohifproject"
+            aria-label="载入完整项目文件"
+            className="hidden"
+            onChange={event => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) run('loadMaskWorkspace', { file });
+            }}
+          />
+          <button
+            type="button"
+            className={`${buttonClass} mt-2 w-full`}
+            disabled={busy || !isSliceViewport || !displaySetId}
+            onClick={() => workspaceInput.current?.click()}
+          >
+            载入整个项目
+          </button>
+          <p className="mask-help">
+            一次保存此序列的所有标注集、重叠 Mask 与 ROI。载入前先导入原始 DICOM；原有结果保留。
+          </p>
         </div>
         <button
           type="button"
