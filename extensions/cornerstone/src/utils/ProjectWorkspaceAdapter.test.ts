@@ -452,3 +452,35 @@ test('临时手柄索引未持久化时按原生契约恢复null，而不是unde
     manager.mockRestore();
   }
 });
+
+test.each([
+  '1.2.840.10008.5.1.4.1.1.66.4',
+  '1.2.840.10008.5.1.4.1.1.66.7',
+  '1.2.840.10008.5.1.4.1.1.481.3',
+])('源分割 %s 的业务身份不依赖随机 displaySet ID；恢复后继续保留', async sopClass => {
+  const { adapter, services, mask } = restorable();
+  const source = {
+    image_id: 'raw-seg',
+    study_uid: '1.2',
+    series_uid: '1.2.9',
+    sop_uid: '1.2.9.1',
+    dataset: { SOPClassUID: sopClass },
+  };
+  const imported: any = { ...project, successes: [...project.successes, source] };
+  services.displaySetService = {
+    getDisplaySetByUID: () => ({
+      SOPInstanceUID: source.sop_uid,
+      SeriesInstanceUID: source.series_uid,
+      StudyInstanceUID: source.study_uid,
+    }),
+  };
+  const state: any = adapter.capture(imported);
+  expect(state.segmentations[0].entity_id).toBe('dicom:1.2/1.2.9/1.2.9.1');
+  state.segmentations[0].segmentationId = 'new-runtime';
+  await adapter.restore(imported, state, new AbortController().signal);
+  mask.segmentationId = 'new-runtime';
+  services.displaySetService.getDisplaySetByUID = () => undefined;
+  expect((adapter.capture(imported) as any).segmentations[0].entity_id).toBe(
+    state.segmentations[0].entity_id
+  );
+});

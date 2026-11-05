@@ -1,7 +1,7 @@
 package cn.colla.phaseone.dashboard;
 
-import cn.colla.phaseone.identity.IdentityRepository;
 import cn.colla.phaseone.dashboard.DashboardDtos.Member;
+import cn.colla.phaseone.identity.IdentityRepository;
 import cn.colla.phaseone.shared.ApiException;
 import cn.colla.phaseone.team.TeamPolicy;
 import java.util.UUID;
@@ -13,55 +13,79 @@ import org.springframework.stereotype.Service;
 /** 演示清单和既有真实任务的范围校验分开；所有数据库操作均为只读。 */
 @Service
 public class DashboardTargetResolver {
-    public record Viewer(String uid, String username, String ownedTeamId) {}
-    private final IdentityRepository identities;
-    private final TeamPolicy teams;
-    private final JdbcTemplate jdbc;
+  public record Viewer(String uid, String username, String ownedTeamId) {}
 
-    public DashboardTargetResolver(IdentityRepository identities, TeamPolicy teams, JdbcTemplate jdbc) {
-        this.identities = identities;
-        this.teams = teams;
-        this.jdbc = jdbc;
-    }
+  private final IdentityRepository identities;
+  private final TeamPolicy teams;
+  private final JdbcTemplate jdbc;
+  private final cn.colla.phaseone.collaboration.TaskAccessPolicy taskAccess;
 
-    public Viewer viewer(String uid) {
-        var account = identities.byUid(uid).filter(user -> "active".equals(user.status()))
+  public DashboardTargetResolver(
+      IdentityRepository identities,
+      TeamPolicy teams,
+      JdbcTemplate jdbc,
+      cn.colla.phaseone.collaboration.TaskAccessPolicy taskAccess) {
+    this.identities = identities;
+    this.teams = teams;
+    this.jdbc = jdbc;
+    this.taskAccess = taskAccess;
+  }
+
+  public Viewer viewer(String uid) {
+    var account =
+        identities
+            .byUid(uid)
+            .filter(user -> "active".equals(user.status()))
             .orElseThrow(ApiException::unauthorized);
-        String defaultTeam;
-        try { defaultTeam = identities.defaultTeam(uid); }
-        catch (EmptyResultDataAccessException missing) { throw notFound(); }
-        var access = teams.requireMember(uid, defaultTeam);
-        if (!uid.equals(access.ownerUid()) || !"owner".equals(access.role())) throw notFound();
-        return new Viewer(uid, account.username(), defaultTeam);
+    String defaultTeam;
+    try {
+      defaultTeam = identities.defaultTeam(uid);
+    } catch (EmptyResultDataAccessException missing) {
+      throw notFound();
     }
+    var access = teams.requireMember(uid, defaultTeam);
+    if (!uid.equals(access.ownerUid()) || !"owner".equals(access.role())) throw notFound();
+    return new Viewer(uid, account.username(), defaultTeam);
+  }
 
-    public Viewer ownedTeam(String uid, String teamId) {
-        String canonical = uuid(teamId);
-        var viewer = viewer(uid);
-        if (!viewer.ownedTeamId().equals(canonical)) throw notFound();
-        return viewer;
-    }
+  public Viewer ownedTeam(String uid, String teamId) {
+    String canonical = uuid(teamId);
+    var viewer = viewer(uid);
+    if (!viewer.ownedTeamId().equals(canonical)) throw notFound();
+    return viewer;
+  }
 
-    public Member requireVisibleRealTask(String uid, String taskId) {
-        // 创建者由服务端登记；只读查询不能使用查看者或团队所有者替代。
-        record Target(String teamId, Member owner) {}
-        var target = jdbc.query("SELECT t.team_id,t.assignee_uid,u.username FROM task_record t JOIN app_user u ON u.uid=t.assignee_uid WHERE t.task_id=?",
-            (row, index) -> new Target(row.getString("team_id"),
-                new Member(row.getString("assignee_uid"), row.getString("username"))), taskId)
-            .stream().findFirst().orElseThrow(DashboardTargetResolver::notFound);
-        teams.requireMember(uid, target.teamId());
-        return target.owner();
-    }
+  public Member requireVisibleRealTask(String uid, String taskId) {
+    // 创建者由服务端登记；只读查询不能使用查看者或团队所有者替代。
+    record Target(String teamId, Member owner) {}
+    var target =
+        jdbc
+            .query(
+                "SELECT t.team_id,t.assignee_uid,u.username FROM task_record t JOIN app_user u ON"
+                    + " u.uid=t.assignee_uid WHERE t.task_id=?",
+                (row, index) ->
+                    new Target(
+                        row.getString("team_id"),
+                        new Member(row.getString("assignee_uid"), row.getString("username"))),
+                taskId)
+            .stream()
+            .findFirst()
+            .orElseThrow(DashboardTargetResolver::notFound);
+    taskAccess.read(uid, taskId);
+    return target.owner();
+  }
 
-    public static String uuid(String value) {
-        try {
-            String canonical = UUID.fromString(value).toString();
-            if (!canonical.equalsIgnoreCase(value)) throw ApiException.validation();
-            return canonical;
-        } catch (IllegalArgumentException invalid) { throw ApiException.validation(); }
+  public static String uuid(String value) {
+    try {
+      String canonical = UUID.fromString(value).toString();
+      if (!canonical.equalsIgnoreCase(value)) throw ApiException.validation();
+      return canonical;
+    } catch (IllegalArgumentException invalid) {
+      throw ApiException.validation();
     }
+  }
 
-    private static ApiException notFound() {
-        return new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "资源不存在");
-    }
+  private static ApiException notFound() {
+    return new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "资源不存在");
+  }
 }

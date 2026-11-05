@@ -97,8 +97,9 @@ test('真实服务工厂读取 HTTP mock，路由切换保留 basename 且不写
   expect(transport.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
 });
 
-test('团队页个人入口传真实默认自有团队，通知不接协作 mock store', async () => {
-  const forUser = jest.spyOn(mockServices!.collaborationMock!, 'forUser');
+test('团队页个人入口传真实默认自有团队，不触发工作台协作发送', async () => {
+  const send = jest.spyOn(mockServices!.collaborationInvitations!, 'send');
+  expect('collaborationMock' in mockServices!).toBe(false);
   mount();
   await screen.findByText('后端演示任务');
   fireEvent.click(screen.getByRole('button', { name: '我的', exact: true }));
@@ -109,7 +110,7 @@ test('团队页个人入口传真实默认自有团队，通知不接协作 mock
   expect(screen.getByRole('menuitem', { name: '退出登录' }).getAttribute('aria-disabled')).toBe(
     'false'
   );
-  expect(forUser).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
 });
 
 test('匿名直达团队路由被真实会话门禁拒绝，不发列表请求', async () => {

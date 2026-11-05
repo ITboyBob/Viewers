@@ -38,10 +38,12 @@
 | 文件与成果 | 上传成功导入的源文件、运行期读取材料／源文件、成果快照提交与读取、修订冲突检查 | 跨后端进程的数据恢复、长期版本历史、完整 PACS／DCM4CHEE 数据集接入 |
 | 标注工作台 | OHIF 原生工具；已存储的 `segmentation/dicomlocal` 任务接入自动保存与恢复；前端生成只读封面 | 对所有 OHIF 模式的自动保存保证、完整 `Mark/MarkRevision` 实体接口 |
 | 本地协作 | 同源、同一浏览器存储分区内，通过 BroadcastChannel 与 IndexedDB 共享文件、参与状态和光标；光标投影按当前 stack 视口的同一影像帧匹配 | 跨浏览器配置／设备的服务器光标同步、服务器在线成员服务、标注／测量内容的实时增量共同编辑 |
-| 权限 | 业务 Bearer 会话、团队成员校验、导入记录归属、任务写入条件等定向守卫 | 原设计完整权限字典、全部角色模板、完整只读授权管理流程 |
+| 工作台协作邀请 | 按真实用户名邀请；通知、标读、接受／拒绝；独立任务授权；接受后加载原工作台，不入队或切队 | 接受后改权、重复邀请、撤权管理、跨实例授权恢复 |
+| 权限 | 业务 Bearer 会话、团队／独立工作台资格、导入记录归属、定向新增分割限制 | 原设计完整权限字典、全部角色模板、完整只读授权管理流程 |
 
 特别注意：
 
+- **“仅查看”只限制 Add Segmentation 对应的新 segmentation 实体，不等于全局只读。**既有分割编辑、添加 segment、其他原本允许的工具和成果保存不因此受限；原本独立的任务只读及修订冲突规则仍然有效。
 - **“成果已保存”不等于“其他客户端已实时收到修改”。**当前成果清单有修订检查，但没有配套的服务器实时广播与合并协议。
 - 当前后端已保存运行期材料与成果，不能再将它描述为“只保存任务时间”；但也不能描述为可跨进程恢复的持久化系统。
 - 团队成员列表、任务成员投影和浏览器本地在线参与者是三种不同对象，不能相互替代。
@@ -54,7 +56,7 @@
 
 以下命令按 macOS／Linux shell 编写；Windows PowerShell 需要改用对应的环境变量设置语法，启动脚本与配置含义不变。
 
-建议使用下列工具链。首次安装前端依赖或启动后端时，需要能够访问相应的软件仓库以下载依赖。
+建议使用下列工具链。首次安装前端依赖或启动后端时，需要能够访问相应的软件仓库以下载依赖。后端固定使用 `dcm4che-core 5.33.1`，从 [dcm4che Maven 仓库](https://www.dcm4che.org/maven2) 下载，仅用于读取原图的分割身份元数据，不引入 DCM4CHEE 服务或像素解码器。
 
 | 工具 | 要求 |
 | --- | --- |
@@ -120,7 +122,7 @@ OHIF_OPEN=false yarn dev:mask
 
 未登录访问受保护入口会进入账号门禁。浏览器业务请求使用同源 `/api/v1`；webpack 默认将 `/api/v1` 和 `/actuator/health` 代理到 `http://127.0.0.1:8081`，无需在页面代码中改后端地址。业务 Token 保存在当前标签页的 sessionStorage，与 OHIF OIDC／PACS 认证分离。
 
-不要把 `dev:fast`、原始默认配置或 E2E 专用配置当作上述启动方式的等价替代，它们的代理／业务开关可能不同。`collaborationMock` 仍用于部分协作邀请展示，真实团队邀请与后端成果存取不因此成为 mock，也不能据此声称已经有服务器实时协作。
+不要把 `dev:fast`、原始默认配置或 E2E 专用配置当作上述启动方式的等价替代，它们的代理／业务开关可能不同。工作台协作邀请和团队邀请均已接入真实服务；浏览器本地文件／光标共享仍是独立链路，不能据此声称已经有服务器实时共同编辑。
 
 ### 3.4 端口与停止方式
 
@@ -179,6 +181,24 @@ OHIF_PORT=3336 COLLA_API_TARGET=http://127.0.0.1:18081 OHIF_OPEN=false yarn dev:
 
 源码入口：[InvitationController](backend/phase-one/src/main/java/cn/colla/phaseone/invitation/InvitationController.java)、[InvitationDtos](backend/phase-one/src/main/java/cn/colla/phaseone/invitation/InvitationDtos.java)、[InvitationService](backend/phase-one/src/main/java/cn/colla/phaseone/invitation/InvitationService.java)、[NotificationReadService](backend/phase-one/src/main/java/cn/colla/phaseone/invitation/NotificationReadService.java)。
 
+#### 工作台协作邀请（已实现）
+
+与上面的入队邀请独立：目标为原 `task_id`，不会添加 `team_member` 或更改当前团队。任何具有目标工作台合法访问资格的用户都可邀请，包括已授权的非团队协作者。
+
+| 方法与路径 | 输入／输出与作用 |
+| --- | --- |
+| `POST /tasks/{taskId}/collaboration-invitations` | `{username,permission:"edit"或"view"}`；201 返回真实邀请 |
+| `GET /tasks/{taskId}/collaboration-invitations/sent` | 本人尚在原五分钟期限内的发送记录；含已接受／拒绝记录及 `meta.server_time` |
+| `GET /notifications/collaboration-invitations` | 当前收件人的分页协作通知 |
+| `GET /notifications/collaboration-invitations/unread-count` | 当前收件人的未读数 |
+| `POST /notifications/collaboration-invitations/read` | `{invitation_ids}`；独立、幂等标读 |
+| `POST /collaboration-invitations/{id}/accept` | `{data:{invitation,task_id,mode_path}}`；授权与接受原子确认 |
+| `POST /collaboration-invitations/{id}/reject` | `{data:invitation}`；不建立授权 |
+
+邀请含工作台名称、真实发起人和收件人摘要、`permission/decision/created_at/expires_at/decided_at/read_at`。同一发起人、任务与收件人的五分钟防重不因处理或刷新提前解除；不同发起人的记录独立。首次接受必须在期限内，成功接受后重复接受同一邀请幂等，原期限到达不撤销授权。已有 `(task_id,uid)` 授权时再次邀请或接受另一份邀请返回 `409 / ALREADY_COLLABORATOR`，不改权、不重复通知。通知不显示权限；接受成功但加载失败保留接受结果，可重试进入，不重复接受。
+
+源码入口：[CollaborationController](backend/phase-one/src/main/java/cn/colla/phaseone/collaboration/CollaborationController.java)、[CollaborationService](backend/phase-one/src/main/java/cn/colla/phaseone/collaboration/CollaborationService.java)、[CollaborationInvitationService](platform/app/src/business/CollaborationInvitationService.ts)。
+
 ### 4.3 团队工作台、任务登记与访问记录
 
 对照：`api.md` §6～7、`model.md` §4～5、`task-management.md` §4～7。
@@ -207,12 +227,12 @@ OHIF_PORT=3336 COLLA_API_TARGET=http://127.0.0.1:18081 OHIF_OPEN=false yarn dev:
 | `POST /teams/{teamId}/task-imports` | 创建／复用导入记录，返回 `import_id/uploaded_files` |
 | `PUT /task-imports/{id}/files/{file}` | 上传清单中指定源文件的原始二进制 |
 | `POST /task-imports/{id}/complete` | 检查上传完整性，在事务中登记任务并关联材料，返回 Task |
-| `GET /tasks/{id}/materials` | 返回 `{task,source,access}`；`access` 含 `owner_uid/can_edit` |
-| `GET /tasks/{id}/files/{file}` | 按任务成员资格读取源文件二进制 |
+| `GET /tasks/{id}/materials` | 返回 `{task,source,access}`；`access` 含 `owner_uid/can_edit/collaboration_permission/can_add_segmentation` |
+| `GET /tasks/{id}/files/{file}` | 按团队资格或指定任务协作授权读取源文件二进制 |
 
-导入请求含 `registration_key/title/kind/folder_name/mode_path/files`；文件描述含 `file_id/selection_index/file_name/relative_path/size/study_uid/series_uid/sop_uid`。`task_import` 保存导入归属与清单，`task_material` 保存任务材料及当前成果清单／修订。暂存上传与完成操作只允许导入记录的创建者执行，材料读取仍需要有效团队成员身份。
+导入请求含 `registration_key/title/kind/folder_name/mode_path/files`；文件描述含 `file_id/selection_index/file_name/relative_path/size/study_uid/series_uid/sop_uid`。`task_import` 保存导入归属与清单，`task_material` 保存任务材料及当前成果清单／修订。暂存上传与完成操作只允许导入记录的创建者执行，材料读取接受有效团队成员资格或后端独立工作台授权；后者不开放团队任务列表与团队成员管理。
 
-后端检查字段、UID 格式、大小、上传完整性及字节哈希；不能将其描述为后端独立解析并验证了 DICOM 内部 UID。当前没有 `DicomDataset/source_id` 资源映射、DCM4CHEE 检索及原设计的数据集授权模型；不能把 Study UID 或上传文件清单直接当作已实现的平台数据集 ID。
+后端检查字段、UID 格式、大小、上传完整性及字节哈希；新增的分割基线从实际原始 SEG／RTSTRUCT 解析 SOP 类别与 Study／Series／SOP UID，不相信客户端的“不是新增”声明。这是新增分割识别，不是对所有导入文件进行完整 DICOM 内容合规验证。当前没有 `DicomDataset/source_id` 资源映射、DCM4CHEE 检索及原设计的数据集授权模型；不能把 Study UID 或上传文件清单直接当作已实现的平台数据集 ID。
 
 源码入口：[TaskStorageService（前端）](platform/app/src/business/TaskStorageService.ts)、[TaskStorageController](backend/phase-one/src/main/java/cn/colla/phaseone/storage/TaskStorageController.java)、[TaskStorageService（后端）](backend/phase-one/src/main/java/cn/colla/phaseone/storage/TaskStorageService.java)。
 
@@ -229,7 +249,7 @@ OHIF_PORT=3336 COLLA_API_TARGET=http://127.0.0.1:18081 OHIF_OPEN=false yarn dev:
 
 `base_revision` 检查当前任务清单的并发修订，`operation_id` 与操作者／载荷约束重放；冲突不等于自动合并。`task_result_operation` 记录幂等载荷与响应，新修订替换当前清单，提交后清理不再引用的旧成果文件。这里的 `revision` 不是逐标注 MarkRevision，也没有长期历史版本查询接口。
 
-`type` 可为 `SR/SEG/RTSTRUCT`，但实际字节是自定义业务成果包，不是标准 DICOM SR／SEG／RTSTRUCT 文件。自动保存当前装配在已存储的 `segmentation/dicomlocal` 分支；不能外推到所有模式。只读封面由前端读取材料、首个成功源文件及当前成果后局部合成，并复核修订；没有独立后端封面 API。
+`type` 可为 `SR/SEG/RTSTRUCT`，但实际字节是自定义业务成果包，不是标准 DICOM SR／SEG／RTSTRUCT 文件。包格式仍为 v1；分割条目增加稳定的 `entity_id`，原始分割采用 `dicom:<study_uid>/<series_uid>/<sop_uid>`，用户新建实体沿用 segmentation 标识，旧包缺省时回退到 `segmentationId`。运行时随机 displaySet 标识不会改变该业务身份。提交时遍历所有类型包内的实体并拒绝重复身份；仅查看者的新增实体返回 `403 / SEGMENTATION_CREATE_FORBIDDEN`，修订不变，合法保存不被永久封禁。更换上传对象 ID、重新编码、向已有分割添加 segment 均不直接等同于新增实体。自动保存当前装配在已存储的 `segmentation/dicomlocal` 分支；不能外推到所有模式。只读封面由前端读取材料、首个成功源文件及当前成果后局部合成，并复核修订；没有独立后端封面 API。
 
 源码入口：[TaskAutoSave](platform/app/src/business/TaskAutoSave.ts)、[ProjectRuntimeService](platform/app/src/business/ProjectRuntimeService.ts)、[TaskResultCodec](extensions/cornerstone/src/utils/TaskResultCodec.ts)、[ReadonlyPreviewLoader](platform/app/src/business/ReadonlyPreviewLoader.ts)、[composeReadonlyPreview](platform/app/src/routes/Team/composeReadonlyPreview.ts)。
 
@@ -238,7 +258,7 @@ OHIF_PORT=3336 COLLA_API_TARGET=http://127.0.0.1:18081 OHIF_OPEN=false yarn dev:
 对照：`permission.md` §2～5、`task-management.md` §3～7，并结合上述 API／模型差异。
 
 - 当前 `SecurityConfig` 处理认证门禁，`TeamPolicy.requireMember` 检查有效账号和目标团队成员关系；没有通用的 21 项权限授权系统、manager／viewer 模板和按个人分配范围过滤。
-- 有效团队成员可读取团队任务、材料和成果；成果写入还检查 `task_read_only`。当前未提供增删该只读记录的业务入口，不能描述为完整可操作的只读权限管理。窄更新时间接口则单独限制导入者，不能与成果写权限混为一谈。
+- 有效团队成员可读取团队任务、材料和成果；非团队用户的独立协作授权只开放指定工作台的材料、文件、成果及必需辅助请求，不开放团队级列表与管理。`access.collaboration_permission` 为 `edit/view/null`，`can_add_segmentation` 由后端计算；`view` 不写成 `can_edit=false`。成果写入仍检查既有 `task_read_only`。当前未提供增删该只读记录的业务入口，不能描述为完整可操作的只读权限管理。窄更新时间接口则单独限制导入者，不能与成果写权限混为一谈。
 - 尚未实现原设计的用户资料／密码／系统授权管理、通用团队 CRUD 与成员管理、通用任务详情／修改／删除、TaskAssignment、任务业务状态与进度、DicomDataset、Mark／MarkRevision 实体 CRUD 及长期版本历史。
 - 浏览器本地 `join/state/heartbeat/cursor/leave` 是本地消息，不是 HTTP DTO 或 SQL 实体；当前业务源码没有服务器实时协作服务，也没有标注内容增量消息。
 - `task-management.md` 中的流程建议不代表已实施；`api.md/model.md` 明确暂不加入的审核功能，也不能因为建议文档出现过就说成当前必备或已冻结能力。
@@ -271,14 +291,17 @@ OHIF_PORT=3336 COLLA_API_TARGET=http://127.0.0.1:18081 OHIF_OPEN=false yarn dev:
 | [V004__task_visits.sql](backend/phase-one/src/main/resources/db/V004__task_visits.sql) | 用户与任务访问关系 |
 | [V005__workspace_storage.sql](backend/phase-one/src/main/resources/db/V005__workspace_storage.sql) | 邀请已读、团队偏好、只读记录、材料与成果操作 |
 | [V006__invitation_validity.sql](backend/phase-one/src/main/resources/db/V006__invitation_validity.sql) | 邀请失效与期限查询索引 |
+| [V007__workspace_collaboration.sql](backend/phase-one/src/main/resources/db/V007__workspace_collaboration.sql) | 工作台协作邀请、独立授权、可信初始分割身份基线 |
 
 需保留的关系与规则包括：一个用户的自有团队约束、团队与用户的复合成员键、登记键的用户作用域、访问记录的用户／任务作用域，以及任务与材料的一对一关系。`task_result_operation` 的任务／操作复合键服务于提交幂等，不是版本历史。
 
-注册创建账号／团队／成员、接受邀请增加成员并使其他邀请失效、任务登记幂等、完成导入与成果提交都涉及现有事务或锁边界。修改时应沿 Service 的 `TransactionTemplate/@Transactional`、登记冲突处理和成果 `afterCommit` 文件清理继续追踪，不能只替换 SQL 连接地址。
+工作台协作授权使用 `(task_id,uid)` 唯一键，记录权限、来源邀请和接受时间，不设置邀请期限式的授权到期时间。协作邀请与首次接受使用任务行锁，接受状态和授权在同一事务确认；它不复用入队邀请增加成员的动作。
+
+注册创建账号／团队／成员、接受入队邀请增加成员并使其他入队邀请失效、任务登记幂等、完成导入与成果提交都涉及现有事务或锁边界。修改时应沿 Service 的 `TransactionTemplate/@Transactional`、登记冲突处理和成果 `afterCommit` 文件清理继续追踪，不能只替换 SQL 连接地址。
 
 ### 5.3 当前 H2 与运行期文件限制
 
-- 数据源为 `jdbc:h2:mem:`，账号、团队、会话、任务及成果索引只属于当前后端进程；浏览器刷新或同一实例下的授权客户端可继续访问，但后端重启后不恢复。
+- 数据源为 `jdbc:h2:mem:`，账号、团队、会话、任务、协作邀请／授权及成果索引只属于当前后端进程；浏览器刷新或同一实例下的授权客户端可继续访问，但后端重启后不恢复。
 - 原始 DICOM 与成果字节在后端临时目录，Blob 路径／哈希索引在进程内；正常销毁会清理临时文件，异常退出可能遗留文件，但这不是可恢复的数据存储。
 - 默认容量限制为单文件 512 MiB、单次导入累计 2 GiB、运行期累计 16 GiB，入口为 `colla.storage.*`；不是正式生产存储容量承诺。
 - 将 H2 改为文件模式或改用 MySQL，不会自动解决临时文件与 Blob 索引的恢复问题；不得据此宣称已经具备长期留存。
@@ -336,6 +359,22 @@ OHIF_PORT=3336 COLLA_API_TARGET=http://127.0.0.1:18081 OHIF_OPEN=false yarn dev:
 ### 6.4 后续验证应覆盖的边界
 
 接手者实现服务器同步后，应覆盖独立浏览器配置或不同设备、不同账号与权限、同帧／异帧光标、相同对象并发编辑、分割大数据、断线重连、乱序／重复消息、注销与卸载后的清理，以及成果保存与重连恢复的一致性。这是后续验收参考，不代表本次已经执行这些验证。
+
+### 6.5 本次协作功能验证
+
+命令执行意图：运行真实后端全部集成测试并检查行／分支覆盖率门禁。预期输出：`BUILD SUCCESS`；行覆盖率与分支覆盖率均不低于 80%。
+
+```sh
+mvn -B -f backend/phase-one/pom.xml verify
+```
+
+命令执行意图：使用专用前后端运行一期真实浏览器回归，包含两个独立账号的 `edit/view` 协作流程。预期输出：全部测试通过；不会复用或停止用户正在运行的服务。运行前确认专用端口 3336、18081 空闲，且 JDK 21／Maven 已加入 PATH。
+
+```sh
+yarn playwright test --config playwright.phase-one.config.ts
+```
+
+验证仍区分业务单测、真实后端、浏览器流程、构建和类型检查。全库 TypeScript 在本次修改前存在 416 条诊断；不能把存量诊断或“总数相同”描述为类型检查通过。改动应按文件与诊断内容对比，不增加新的诊断。
 
 ## 7. 上游项目与许可证
 

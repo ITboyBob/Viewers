@@ -440,3 +440,23 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+
+.business-permission-field {
+  flex: 0 0 100px;
+}
+.business-permission-field select {
+  width: 100%;
+  height: 48px;
+  border: 1px solid #3a5573;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #091a31;
+  color: #d8edff;
+}
+.business-unread-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+}

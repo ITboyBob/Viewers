@@ -78,33 +78,20 @@ test('顶部点击和文件投放隔离外层返回／Dropzone', () => {
   expect(drop).not.toHaveBeenCalled();
 });
 
-test('mock 工厂缓存同 uid 的故障／防重状态并隔离不同发起者', () => {
-  sessionStorage.clear();
-  const container = createBusinessServices(
-    { enabled: true },
-    { storage: sessionStorage, clock: () => 1000000 }
-  );
-  const user = { uid: 'a', username: 'owner', avatar_url: null };
-  const first = container.collaborationMock!.forUser(user);
-  first.invite('陈晨');
-  expect(container.collaborationMock!.forUser({ ...user })).toBe(first);
-  expect(container.collaborationMock!.forUser({ ...user, uid: 'b' }).list()).toEqual([]);
+test('服务工厂只装配真实协作服务，不再提供模拟邀请工厂', () => {
+  const container = createBusinessServices({ enabled: true }, { storage: null });
+  expect(container.collaborationInvitations).toBeTruthy();
+  expect('collaborationMock' in container).toBe(false);
 });
 
-test('浏览器禁用 sessionStorage 时真实服务仍存在，mock fail-closed', () => {
-  const access = jest.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
-    throw new Error('storage denied');
+test('浏览器禁用 sessionStorage 时仍装配真实协作服务', () => {
+  const spy = jest.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+    throw new Error('storage disabled');
   });
   try {
-    const container = createBusinessServices({ enabled: true });
-    expect(container.teamInvitations).toBeTruthy();
-    expect(
-      container
-        .collaborationMock!.forUser({ uid: 'u', username: 'user', avatar_url: null })
-        .getError()
-    ).toBeTruthy();
+    expect(createBusinessServices({ enabled: true }).collaborationInvitations).toBeTruthy();
   } finally {
-    access.mockRestore();
+    spy.mockRestore();
   }
 });
 

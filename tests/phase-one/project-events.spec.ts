@@ -594,7 +594,7 @@ for (const status of [403, 404]) {
   });
 }
 
-test('A联合B：读取真实成员及发送合成协作邀请不触发项目时间', async ({ page, request }) => {
+test('A联合B：读取真实成员及发送真实协作邀请不触发项目时间', async ({ page, request }) => {
   await enter(page, request);
   let touches = 0;
   page.on('request', req => {
@@ -611,14 +611,21 @@ test('A联合B：读取真实成员及发送合成协作邀请不触发项目时
   await page.getByRole('button', { name: '邀请', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '邀请他人协作' });
   await expect(dialog).toBeVisible();
-  await dialog
-    .getByRole('button', { name: /^邀请.+/ })
-    .filter({ hasText: '邀请他' })
-    .first()
-    .click();
-  await expect(
-    dialog.getByRole('button', { name: /^邀请.+/ }).filter({ hasText: '已邀请' })
-  ).toHaveCount(1);
+  const username = 'events-collaborator-' + randomUUID().slice(0, 8);
+  expect(
+    (
+      await request.post('/api/v1/users', { data: { username, password: 'synthetic-password' } })
+    ).status()
+  ).toBe(201);
+  await dialog.getByLabel('用户名', { exact: true }).fill(username);
+  const sent = page.waitForResponse(
+    r =>
+      r.request().method() === 'POST' &&
+      new URL(r.url()).pathname.endsWith('/collaboration-invitations')
+  );
+  await dialog.getByRole('button', { name: '按用户名邀请' }).click();
+  expect((await sent).status()).toBe(201);
+  await expect(dialog.getByRole('button', { name: '按用户名邀请' })).toHaveText('已邀请');
   await frames(page);
   expect(touches).toBe(0);
 });

@@ -362,3 +362,22 @@ test('已取消或成员资格变化的后端恢复不能激活，必须释放�
   await expect(service.restoreStored(storedMaterials(), selection)).rejects.toThrow();
   expect(service.getCurrent()).toBeNull();
 });
+
+test('非团队用户凭后端独立授权恢复指定任务，保留后仍受账号 generation 限制', async () => {
+  snapshot = { ...snapshot, context: { ...snapshot.context!, memberships: [] } };
+  const materials = storedMaterials();
+  materials.access = {
+    can_edit: true,
+    collaboration_permission: 'view',
+    can_add_segmentation: false,
+  };
+  const p = await service.restoreStored(materials, selection);
+  expect(p.viewer_uid).toBe('u');
+  expect(p.importer_uid).toBe('original-creator');
+  expect(p.can_edit).toBe(true);
+  expect(p.can_add_segmentation).toBe(false);
+  expect(service.getRetained('stored-task')).toBe(p);
+  snapshot = { status: 'invalid', context: null, currentTeamId: null, error: null };
+  emit();
+  expect(service.getRetained('stored-task')).toBeNull();
+});

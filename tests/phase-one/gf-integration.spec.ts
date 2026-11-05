@@ -57,7 +57,7 @@ async function identity(page: Page): Promise<IssuedBusinessSession> {
   return { ...(await current.json()).data, token };
 }
 
-test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新，验证隔离、mock与退出', async ({
+test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新，验证隔离、真实协作邀请与退出', async ({
   page,
   request,
   baseURL,
@@ -292,22 +292,24 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
     ).toBeVisible();
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '邀请', exact: true }).click();
-    const mock = page.getByRole('dialog', { name: '邀请他人协作' });
-    await mock
-      .getByRole('button', { name: /^邀请.+/ })
-      .filter({ hasText: '邀请他' })
-      .first()
-      .click();
-    await expect(
-      mock.getByRole('button', { name: /^邀请.+/ }).filter({ hasText: '已邀请' })
-    ).toHaveCount(1);
+    const collaboration = page.getByRole('dialog', { name: '邀请他人协作' });
+    await expect(collaboration.getByText(/合成|模拟/)).toHaveCount(0);
+    await collaboration.getByLabel('用户名', { exact: true }).fill(recipientName);
+    const collaborationSent = page.waitForResponse(
+      r =>
+        r.request().method() === 'POST' &&
+        new URL(r.url()).pathname.endsWith('/collaboration-invitations')
+    );
+    await collaboration.getByRole('button', { name: '按用户名邀请' }).click();
+    expect((await collaborationSent).status()).toBe(201);
+    await expect(collaboration.getByRole('button', { name: '按用户名邀请' })).toHaveText('已邀请');
     await frames(page);
     expect({
       requests: touches.length,
       responses: written.length,
       otherWrites,
       url: page.url(),
-    }).toEqual(before);
+    }).toEqual({ ...before, otherWrites: before.otherWrites + 1 });
     expect((await members()).filter(item => item.uid === recipient.user.uid)).toHaveLength(1);
     await page.evaluate(() => (window as unknown as GFWindow).gfAudit.stop());
     await page.goBack();

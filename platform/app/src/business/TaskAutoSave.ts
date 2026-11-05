@@ -21,6 +21,7 @@ export class TaskAutoSave {
   private retry = 0;
   private status: HTMLDivElement | undefined;
   private conflict = false;
+  private segmentationDenied = false;
   private started = false;
   private allowed = false;
   private restoring = false;
@@ -46,6 +47,21 @@ export class TaskAutoSave {
     this.project.can_edit = canEdit;
     this.adapter.setReadOnly?.(!canEdit);
     window.dispatchEvent(new Event('colla:task-access'));
+  }
+  private capabilities(access: import('@ohif/core').TaskAccess) {
+    const permission =
+      access.collaboration_permission === 'edit' || access.collaboration_permission === 'view'
+        ? access.collaboration_permission
+        : null;
+    const canAdd = access.can_add_segmentation === true;
+    if (
+      this.project.can_add_segmentation !== canAdd ||
+      this.project.collaboration_permission !== permission
+    ) {
+      this.project.can_add_segmentation = canAdd;
+      this.project.collaboration_permission = permission;
+      window.dispatchEvent(new Event('colla:task-access'));
+    }
   }
   private show(message: string, retryable = false) {
     if (!this.status) {
@@ -93,6 +109,7 @@ export class TaskAutoSave {
       if (signal.aborted || this.stopped || !this.active()) {
         throw new Error('成果恢复已取消');
       }
+      this.capabilities(value.access);
       this.fingerprint = await this.hash(artifacts);
       this.revision = value.revision;
       this.allowed = value.access.can_edit;
@@ -112,6 +129,7 @@ export class TaskAutoSave {
     if (this.conflict || this.stopped || !this.active() || this.recovery) {
       return;
     }
+    this.segmentationDenied = false;
     if (this.hasPending || this.adapter.isBusy?.()) {
       if (!this.hasPending) {
         this.generation++;
@@ -171,6 +189,7 @@ export class TaskAutoSave {
               return;
             }
             // 暂停输入不等于丢弃断连前已启动、随后完成的原生操作。
+            this.segmentationDenied = false;
             this.generation++;
             if (this.project.can_edit) {
               this.show('有未保存成果');
@@ -256,6 +275,7 @@ export class TaskAutoSave {
       this.acknowledged = pending.generation;
       this.pending = undefined;
       this.retry = 0;
+      this.capabilities(result.access);
       this.allowed = result.access.can_edit;
       this.permission(this.allowed);
       this.show(
@@ -267,6 +287,15 @@ export class TaskAutoSave {
       );
     } catch (error) {
       if (this.stopped || controller.signal.aborted) {
+        return;
+      }
+      if ((error as { reason?: string }).reason === 'SEGMENTATION_CREATE_FORBIDDEN') {
+        this.segmentationDenied = this.generation === (this.pending?.generation ?? this.generation);
+        this.pending = undefined;
+        this.retry = 0;
+        this.project.can_add_segmentation = false;
+        window.dispatchEvent(new Event('colla:task-access'));
+        this.show('没有新增分割权限；请移除未获授权的新分割后重试保存', true);
         return;
       }
       this.permission(false);
@@ -296,7 +325,13 @@ export class TaskAutoSave {
       }
     } finally {
       this.flight = undefined;
-      if (!this.stopped && !this.conflict && this.hasPending && !this.retry) {
+      if (
+        !this.stopped &&
+        !this.conflict &&
+        !this.segmentationDenied &&
+        this.hasPending &&
+        !this.retry
+      ) {
         this.schedule(this.delay);
       }
     }

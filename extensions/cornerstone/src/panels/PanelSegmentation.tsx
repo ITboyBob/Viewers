@@ -1,5 +1,6 @@
 import React from 'react';
 import useTaskReadOnly from '../hooks/useTaskReadOnly';
+import useCanAddSegmentation from '../hooks/useCanAddSegmentation';
 import { SegmentationTable } from '@ohif/ui-next';
 import { useActiveViewportSegmentationRepresentations } from '../hooks/useActiveViewportSegmentationRepresentations';
 import { metaData, cache } from '@cornerstonejs/core';
@@ -8,6 +9,7 @@ import { useSystem } from '@ohif/core/src';
 export default function PanelSegmentation({ children }: withAppTypes) {
   const { commandsManager, servicesManager } = useSystem();
   const readOnly = useTaskReadOnly();
+  const canAddSegmentation = useCanAddSegmentation();
   const { customizationService, displaySetService } = servicesManager.services;
 
   const { segmentationsWithRepresentations, disabled } =
@@ -150,6 +152,7 @@ export default function PanelSegmentation({ children }: withAppTypes) {
   // Common props for SegmentationTable
   const tableProps = {
     disabled,
+    addSegmentationDisabled: !canAddSegmentation,
     data: segmentationsWithRepresentations,
     mode: segmentationTableMode,
     title: 'Segmentations',

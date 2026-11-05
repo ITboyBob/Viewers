@@ -1,3 +1,4 @@
+import { canCreateSegmentation } from './utils/SegmentationCreationPermission';
 import {
   getEnabledElement,
   StackViewport,
@@ -1525,6 +1526,11 @@ function commandsModule({
      * as a segmentation representation to the viewport.
      */
     createLabelmapForViewport: async ({ viewportId, options = {} }) => {
+      if (!canCreateSegmentation(servicesManager.services)) {
+        return;
+      }
+      const originalProject =
+        servicesManager.services.businessServices?.projectRuntime?.getCurrent?.();
       const { viewportGridService, displaySetService, segmentationService } =
         servicesManager.services;
       const { viewports } = viewportGridService.getState();
@@ -1561,6 +1567,15 @@ function commandsModule({
       );
 
       // Also add the segmentation representation to the viewport
+      if (
+        !canCreateSegmentation(servicesManager.services) ||
+        servicesManager.services.businessServices?.projectRuntime?.getCurrent?.() !==
+          originalProject
+      ) {
+        segmentationService.remove(generatedSegmentationId);
+        return;
+      }
+
       await segmentationService.addSegmentationRepresentation(viewportId, {
         segmentationId,
         type: Enums.SegmentationRepresentations.Labelmap,

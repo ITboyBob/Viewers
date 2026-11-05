@@ -142,9 +142,14 @@ export class LocalProjectService implements LocalProjects {
     signal?: AbortSignal
   ): Promise<LocalProject> {
     const before = this.session.getSnapshot();
+    const collaboration = ['edit', 'view'].includes(
+      materials.access.collaboration_permission ?? ''
+    );
     if (
       before.status !== 'authenticated' ||
-      !before.context?.memberships.some(m => m.team_id === materials.task.team_id)
+      !before.context ||
+      (!before.context.memberships.some(m => m.team_id === materials.task.team_id) &&
+        !collaboration)
     )
       throw new Error('没有任务资格');
     this.dispose();
@@ -158,7 +163,8 @@ export class LocalProjectService implements LocalProjects {
       attempt !== this.attempt ||
       after.status !== 'authenticated' ||
       after.context?.user.uid !== before.context.user.uid ||
-      !after.context.memberships.some(m => m.team_id === materials.task.team_id) ||
+      (!after.context.memberships.some(m => m.team_id === materials.task.team_id) &&
+        !collaboration) ||
       generation !== this.generation ||
       batch.failures.length ||
       batch.successes.length !== materials.source.files.length
@@ -191,6 +197,8 @@ export class LocalProjectService implements LocalProjects {
       mode_path: materials.source.mode_path,
       phase: 'registered',
       can_edit: materials.access.can_edit,
+      collaboration_permission: collaboration ? materials.access.collaboration_permission : null,
+      can_add_segmentation: materials.access.can_add_segmentation === true,
       source_stored: true,
     };
     this.current = project;
@@ -208,7 +216,9 @@ export class LocalProjectService implements LocalProjects {
       project.phase === 'registered' &&
       snapshot.status === 'authenticated' &&
       snapshot.context?.user.uid === (project.viewer_uid ?? project.importer_uid) &&
-      snapshot.context.memberships.some(member => member.team_id === project.team_id)
+      (snapshot.context.memberships.some(member => member.team_id === project.team_id) ||
+        (project.source_stored === true &&
+          ['edit', 'view'].includes(project.collaboration_permission ?? '')))
     );
   }
   retain = (project: LocalProject) => {

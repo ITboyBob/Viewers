@@ -49,6 +49,7 @@ export interface ExportOption {
 export interface SegmentationTableContextType {
   data: ViewportSegmentationInfo[];
   disabled: boolean;
+  addSegmentationDisabled?: boolean;
   mode: 'collapsed' | 'expanded';
   fillAlpha: number;
   exportOptions?: ExportOption[];

@@ -159,6 +159,12 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
             key={context.user.uid}
             user={context.user}
             api={services.teamInvitations}
+            collaborationApi={services.collaborationInvitations}
+            onOpenWorkspace={async (taskId, signal) => {
+              if (!(await opener.open(taskId, signal))) {
+                throw new Error('原图或成果加载失败，请重试进入');
+              }
+            }}
             onAccepted={async () => {
               await (services.session.refreshContext?.() ?? services.session.validateCurrent());
             }}

@@ -1,128 +1,108 @@
 import React from 'react';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import CollaborationInviteDialog from './CollaborationInviteDialog';
-import { CollaborationMockStore } from '../mock/CollaborationMockStore';
-
 const h = React.createElement;
-const user = { uid: 'u', username: 'owner', avatar_url: null };
 const open = () => fireEvent.click(screen.getByRole('button', { name: '邀请', exact: true }));
 const close = () => fireEvent.click(screen.getByRole('button', { name: '关闭邀请弹窗' }));
-const rowInvite = () => screen.getByRole('button', { name: '邀请陈晨' });
+const submit = () => screen.getByRole('button', { name: '按用户名邀请' }) as HTMLButtonElement;
+let api: any;
 beforeEach(() => {
-  sessionStorage.clear();
-  jest.useFakeTimers({ now: 1000000 });
+  jest.useFakeTimers({ now: Date.parse('2026-11-06T00:00:00Z') });
+  api = {
+    listSent: jest.fn().mockResolvedValue({ data: [], server_time: new Date().toISOString() }),
+    send: jest.fn(async (_task, name, permission) => ({
+      invitation_id: 'i',
+      task_id: 'task',
+      invitee: { uid: 'v', username: name },
+      permission,
+      decision: 'pending',
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 300000).toISOString(),
+    })),
+  };
 });
 afterEach(() => {
   cleanup();
   jest.useRealTimers();
 });
-
-test('空值禁用，合成成员可选，用户名只可邀请非本人的已注册合成用户，不生成邀请码', () => {
-  const store = new CollaborationMockStore(user, sessionStorage);
-  render(h(CollaborationInviteDialog, { store }));
+const flush = () =>
+  act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+test('无合成成员，默认可编辑，真实发送所选权限，处理中防重', async () => {
+  render(h(CollaborationInviteDialog, { api, taskId: 'task' }));
   open();
-  expect(screen.getByRole('dialog', { name: '邀请他人协作' })).toBeTruthy();
-  expect((screen.getByRole('button', { name: '按用户名邀请' }) as HTMLButtonElement).disabled).toBe(
-    true
-  );
-  expect(screen.getByText(/仅使用合成用户/)).toBeTruthy();
-  expect(screen.queryByText('生成邀请码')).toBeNull();
-  fireEvent.change(screen.getByLabelText('用户名'), { target: { value: '未知用户' } });
-  fireEvent.click(screen.getByRole('button', { name: '按用户名邀请' }));
-  expect(screen.getByRole('alert')).toBeTruthy();
-  expect(store.list()).toHaveLength(0);
-  fireEvent.change(screen.getByLabelText('用户名'), { target: { value: '周宁' } });
-  fireEvent.click(screen.getByRole('button', { name: '按用户名邀请' }));
-  expect(store.list()[0].recipient_username).toBe('周宁');
-  expect(screen.getByRole('button', { name: '按用户名邀请' }).textContent).toBe('已邀请');
+  await flush();
+  expect(screen.queryByText(/合成|陈晨|李敏|周宁/)).toBeNull();
+  expect((screen.getByLabelText('权限') as HTMLSelectElement).value).toBe('edit');
+  expect(submit().disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('用户名'), { target: { value: ' Bob ' } });
+  fireEvent.change(screen.getByLabelText('权限'), { target: { value: 'view' } });
+  fireEvent.click(submit());
+  fireEvent.click(submit());
+  await flush();
+  expect(api.send).toHaveBeenCalledTimes(1);
+  expect(api.send.mock.calls[0].slice(0, 3)).toEqual(['task', 'Bob', 'view']);
+  expect(submit().textContent).toBe('已邀请');
+  expect(submit().disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('权限'), { target: { value: 'edit' } });
+  expect(submit().disabled).toBe(true);
 });
-
-test('299999ms 重开仍禁用，恰好300000ms恢复，不重新计时', () => {
-  const store = new CollaborationMockStore(user, sessionStorage);
-  render(h(CollaborationInviteDialog, { store }));
-  open();
-  fireEvent.click(rowInvite());
-  const expiry = store.list()[0].expires_at;
-  expect(rowInvite().textContent).toBe('已邀请');
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(true);
-  close();
-  act(() => {
-    jest.advanceTimersByTime(299999);
-  });
-  open();
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(true);
-  expect(store.list()[0].expires_at).toBe(expiry);
-  act(() => {
-    jest.advanceTimersByTime(1);
-  });
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(false);
-  expect(rowInvite().textContent).toBe('邀请他');
-});
-
-test.each(['accepted', 'rejected'] as const)('%s 后刷新实例和重开仍不提前解锁', decision => {
-  const store = new CollaborationMockStore(user, sessionStorage);
-  const record = store.invite('陈晨');
-  store.decide(record.mock_id, decision);
-  const view = render(h(CollaborationInviteDialog, { store }));
-  open();
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(true);
-  view.unmount();
-  act(() => {
-    jest.advanceTimersByTime(100000);
-  });
-  render(h(CollaborationInviteDialog, { store: new CollaborationMockStore(user, sessionStorage) }));
-  open();
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(true);
-  act(() => {
-    jest.advanceTimersByTime(200000);
-  });
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(false);
-});
-
-test('损坏数据与写入失败在现有错误区显示并阻止发送，不把失败当成功', () => {
-  const disk = { getItem: () => '{', setItem: jest.fn() };
-  const view = render(
-    h(CollaborationInviteDialog, { store: new CollaborationMockStore(user, disk) })
-  );
-  open();
-  expect(screen.getByRole('alert')).toBeTruthy();
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(true);
-  expect(disk.setItem).not.toHaveBeenCalled();
-  view.unmount();
-  const broken = {
-    getItem: () => null,
-    setItem: () => {
-      throw new Error('quota');
-    },
-  };
-  render(h(CollaborationInviteDialog, { store: new CollaborationMockStore(user, broken) }));
-  open();
-  fireEvent.click(rowInvite());
-  expect(screen.getByRole('alert').textContent).toMatch(/刷新/);
-  expect((rowInvite() as HTMLButtonElement).disabled).toBe(true);
-});
-
-test('缺失 mock 存储不能转发到真实服务，所有按钮操作零网络／零导航', () => {
-  const old = globalThis.fetch;
-  const forbidden = jest.fn(() => {
-    throw new Error('禁止请求');
-  });
-  globalThis.fetch = forbidden;
-  const nav = jest.spyOn(window.history, 'pushState').mockImplementation(() => {
-    throw new Error('禁止跳转');
-  });
-  try {
-    render(
-      h(CollaborationInviteDialog, { store: new CollaborationMockStore(user, sessionStorage) })
-    );
+test.each(['accepted', 'rejected'])(
+  '%s 记录在原五分钟内重开、刷新仍恢复本人已邀请',
+  async decision => {
+    const expires_at = new Date(Date.now() + 300000).toISOString();
+    api.listSent.mockImplementation(async () => ({
+      data: [
+        {
+          invitation_id: 'i',
+          task_id: 'task',
+          invitee: { uid: 'v', username: 'Bob' },
+          decision,
+          created_at: new Date().toISOString(),
+          expires_at,
+        },
+      ],
+      server_time: new Date().toISOString(),
+    }));
+    const view = render(h(CollaborationInviteDialog, { api, taskId: 'task' }));
     open();
-    fireEvent.click(rowInvite());
+    await flush();
+    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'Bob' } });
+    expect(submit().disabled).toBe(true);
     close();
+    act(() => jest.advanceTimersByTime(299999));
     open();
-    expect(forbidden).not.toHaveBeenCalled();
-    expect(nav).not.toHaveBeenCalled();
-  } finally {
-    globalThis.fetch = old;
-    nav.mockRestore();
+    await flush();
+    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'Bob' } });
+    expect(submit().disabled).toBe(true);
+    act(() => jest.advanceTimersByTime(1));
+    expect(submit().disabled).toBe(false);
+    view.unmount();
   }
+);
+test('读取或发送失败显示明确错误，不冒充已邀请', async () => {
+  api.send.mockRejectedValue(new Error('无法邀请该用户'));
+  render(h(CollaborationInviteDialog, { api, taskId: 'task' }));
+  open();
+  await flush();
+  fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'missing' } });
+  fireEvent.click(submit());
+  await flush();
+  expect(screen.getByRole('alert').textContent).toContain('无法邀请该用户');
+  expect(submit().textContent).toBe('邀请');
+  close();
+  api.listSent.mockRejectedValue(new Error('记录读取失败'));
+  open();
+  await flush();
+  expect(screen.getByRole('alert').textContent).toContain('记录读取失败');
+  expect(submit().disabled).toBe(true);
+});
+test('没有真实服务或工作台标识时不可发送', async () => {
+  render(h(CollaborationInviteDialog, {}));
+  open();
+  await flush();
+  expect(submit().disabled).toBe(true);
+  expect(screen.getByRole('alert')).toBeTruthy();
 });

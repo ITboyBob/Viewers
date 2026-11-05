@@ -355,3 +355,54 @@ test('重连等待原生操作结束，未改变成果时重新校验权限，�
   expect(saver.hasPending).toBe(false);
   saver.stop();
 });
+
+test('仅新增分割被拒绝不全局只读、不无限重试，移除新增实体后仍能正常保存', async () => {
+  let change = () => {};
+  const project: any = { task_id: 'task', can_edit: true, can_add_segmentation: false };
+  const service: any = {
+    EVENTS: { MODIFIED: 'modified' },
+    subscribe: (_: any, fn: any) => {
+      change = fn;
+      return { unsubscribe: jest.fn() };
+    },
+  };
+  const access = { can_edit: true, collaboration_permission: 'view', can_add_segmentation: false };
+  const storage: any = {
+    results: jest.fn().mockResolvedValue({ revision: 0, objects: [], access }),
+    save: jest
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('没有新增分割权限'), {
+          status: 403,
+          reason: 'SEGMENTATION_CREATE_FORBIDDEN',
+        })
+      )
+      .mockResolvedValue({ revision: 1, objects: [], access }),
+  };
+  const adapter: any = {
+    exportArtifacts: jest.fn().mockResolvedValue([{ type: 'SEG', blob: new Blob(['new']) }]),
+    setReadOnly: jest.fn(),
+  };
+  const saver = new TaskAutoSave(project, storage, adapter, [service], () => true, 5);
+  await saver.restore(new AbortController().signal);
+  await saver.start();
+  adapter.setReadOnly.mockClear();
+  adapter.exportArtifacts.mockResolvedValue([{ type: 'SEG', blob: new Blob(['forbidden']) }]);
+  change();
+  await tick();
+  await tick();
+  expect(storage.save).toHaveBeenCalledTimes(1);
+  expect(project.can_edit).toBe(true);
+  expect(adapter.setReadOnly).not.toHaveBeenCalledWith(true);
+  await tick();
+  expect(storage.save).toHaveBeenCalledTimes(1);
+  adapter.exportArtifacts.mockResolvedValue([
+    { type: 'SEG', blob: new Blob(['existing updated']) },
+  ]);
+  change();
+  await tick();
+  await tick();
+  expect(storage.save).toHaveBeenCalledTimes(2);
+  expect(saver.hasPending).toBe(false);
+  saver.stop();
+});

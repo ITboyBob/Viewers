@@ -44,7 +44,11 @@ public class TaskStorageService {
 
   public record ImportView(String import_id, List<String> uploaded_files) {}
 
-  public record Access(String owner_uid, boolean can_edit) {}
+  public record Access(
+      String owner_uid,
+      boolean can_edit,
+      String collaboration_permission,
+      boolean can_add_segmentation) {}
 
   public record Materials(Task task, StartImport source, Access access) {}
 
@@ -60,9 +64,11 @@ public class TaskStorageService {
 
   private final JdbcTemplate jdbc;
   private final TeamPolicy teams;
+  private final cn.colla.phaseone.collaboration.TaskAccessPolicy taskAccess;
   private final TaskRepository tasks;
   private final TaskRegistrationService registrations;
   private final ObjectMapper json;
+  private final SegmentationIdentityReader segmentations;
   private final Clock clock;
   private final Path root;
   private final java.util.concurrent.atomic.AtomicLong occupied =
@@ -74,9 +80,11 @@ public class TaskStorageService {
   public TaskStorageService(
       JdbcTemplate jdbc,
       TeamPolicy teams,
+      cn.colla.phaseone.collaboration.TaskAccessPolicy taskAccess,
       TaskRepository tasks,
       TaskRegistrationService registrations,
       ObjectMapper json,
+      SegmentationIdentityReader segmentations,
       Clock clock,
       @Value("${colla.storage.max-file-bytes:536870912}") long maxFile,
       @Value("${colla.storage.max-study-bytes:2147483648}") long maxStudy,
@@ -84,9 +92,11 @@ public class TaskStorageService {
       throws IOException {
     this.jdbc = jdbc;
     this.teams = teams;
+    this.taskAccess = taskAccess;
     this.tasks = tasks;
     this.registrations = registrations;
     this.json = json;
+    this.segmentations = segmentations;
     this.clock = clock;
     if (maxFile < 1 || maxStudy < maxFile || maxRuntime < maxStudy)
       throw new IllegalArgumentException("文件容量配置无效");
@@ -362,6 +372,13 @@ public class TaskStorageService {
         task.task_id(),
         id,
         row.manifest());
+    var initialIds = new HashSet<String>();
+    for (var file : input.files())
+      initialIds.addAll(segmentations.source(blob("source/" + id + "/" + file.file_id()).path()));
+    jdbc.update(
+        "UPDATE task_material SET initial_segmentation_ids=? WHERE task_id=?",
+        encode(initialIds),
+        task.task_id());
     jdbc.update("UPDATE task_import SET task_id=? WHERE import_id=?", task.task_id(), id);
     return task;
   }
@@ -387,17 +404,14 @@ public class TaskStorageService {
 
   public Access access(String uid, String rawId, boolean write) {
     String id = uuid(rawId);
-    var task = task(id);
-    teams.requireMember(uid, task.team_id());
-    boolean editable =
-        jdbc.queryForObject(
-                "SELECT COUNT(*) FROM task_read_only WHERE task_id=? AND uid=?",
-                Integer.class,
-                id,
-                uid)
-            == 0;
-    if (write && !editable) throw new ApiException(HttpStatus.FORBIDDEN, "FORBIDDEN", "当前任务为只读");
-    return new Access(task.assignee_uid(), editable);
+    var effective = taskAccess.read(uid, id);
+    if (write && !effective.canEdit())
+      throw new ApiException(HttpStatus.FORBIDDEN, "FORBIDDEN", "当前任务为只读");
+    return new Access(
+        effective.ownerUid(),
+        effective.canEdit(),
+        effective.collaborationPermission(),
+        effective.canAddSegmentation());
   }
 
   public Materials materials(String uid, String rawId) {
@@ -460,7 +474,7 @@ public class TaskStorageService {
     return blob("result/" + id + "/" + object).path();
   }
 
-  private void validateArtifact(Blob blob, String taskId, String type) {
+  private Set<String> validateArtifact(Blob blob, String taskId, String type) {
     try (var input = Files.newInputStream(blob.path())) {
       byte[] prefix = input.readNBytes(4);
       if (prefix.length != 4) throw ApiException.validation();
@@ -481,6 +495,7 @@ public class TaskStorageService {
           || !state.path("measurements").isArray()
           || !state.path("segmentations").isArray()) throw ApiException.validation();
       if (4L + length + binaryLength(state) != blob.size()) throw ApiException.validation();
+      return segmentations.packet(state);
     } catch (IOException invalid) {
       throw ApiException.validation();
     }
@@ -561,6 +576,18 @@ public class TaskStorageService {
     if (current.revision() != input.base_revision()) throw conflict("REVISION_CONFLICT");
     Set<String> seen = new HashSet<>(), existing = new HashSet<>();
     current.objects().forEach(o -> existing.add(o.object_id()));
+    Set<String> allowedIds = new HashSet<>();
+    String initialIds =
+        jdbc.queryForObject(
+            "SELECT initial_segmentation_ids FROM task_material WHERE task_id=?", String.class, id);
+    try {
+      json.readTree(initialIds).forEach(value -> allowedIds.add(value.asText()));
+    } catch (IOException invalid) {
+      throw new IllegalStateException("原始分割基线损坏", invalid);
+    }
+    for (var o : current.objects())
+      allowedIds.addAll(validateArtifact(blob("result/" + id + "/" + o.object_id()), id, o.type()));
+    Set<String> submittedIds = new HashSet<>();
     for (var o : input.objects()) {
       if (o == null) throw ApiException.validation();
       uuid(o.object_id());
@@ -568,7 +595,11 @@ public class TaskStorageService {
           || !seen.add(o.object_id())
           || !Set.of("SR", "SEG", "RTSTRUCT").contains(o.type())) throw ApiException.validation();
       var value = blob("result/" + id + "/" + o.object_id());
-      validateArtifact(value, id, o.type());
+      var ids = validateArtifact(value, id, o.type());
+      for (String entity : ids) if (!submittedIds.add(entity)) throw ApiException.validation();
+      if (!access.can_add_segmentation() && !allowedIds.containsAll(ids))
+        throw new ApiException(
+            HttpStatus.FORBIDDEN, "FORBIDDEN", "没有新增分割权限", "SEGMENTATION_CREATE_FORBIDDEN");
       if (!existing.contains(o.object_id()) && !uid.equals(value.actor())) throw missing();
     }
     var next = new Results(current.revision() + 1, List.copyOf(input.objects()), access);

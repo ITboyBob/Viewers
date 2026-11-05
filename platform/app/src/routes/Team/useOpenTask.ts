@@ -19,15 +19,17 @@ export default function useOpenTask(services: BusinessServices) {
       controller.current?.abort();
     };
   }, []);
-  const open = async (taskId: string) => {
-    if (busy.current) {
-      return;
+  const open = async (taskId: string, signal?: AbortSignal): Promise<boolean> => {
+    if (busy.current || signal?.aborted) {
+      return false;
     }
     busy.current = true;
     setOpening(taskId);
     setError('');
     const abort = new AbortController();
     controller.current = abort;
+    const cancel = () => abort.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
     const projects = services.localProjects,
       runtime = services.projectRuntime;
     let project = projects?.getRetained?.(taskId);
@@ -37,17 +39,20 @@ export default function useOpenTask(services: BusinessServices) {
     const eligible = () =>
       mounted.current && !abort.signal.aborted && projects?.getRetained?.(taskId) === project;
     try {
+      if (runtime?.getCurrent?.()?.task_id !== taskId) {
+        runtime?.prepareSuspend?.();
+      }
       if (services.taskStorage) project = await services.taskStorage.open(taskId, abort.signal);
       if (!project || !projects || !runtime || !services.tasks || !services.teamPage) {
         throw new Error('当前页面未保留该任务影像，需重新导入；重新导入会创建新任务。');
       }
       await services.teamPage.listTaskMembers(taskId, abort.signal);
       if (!eligible()) {
-        return;
+        return false;
       }
       if (!services.taskStorage) await services.tasks.visit(taskId, abort.signal);
       if (!eligible()) {
-        return;
+        return false;
       }
       projects.activate(taskId);
       scope = DicomMetadataStore.prepareLocalImportScope(
@@ -72,11 +77,14 @@ export default function useOpenTask(services: BusinessServices) {
         },
       });
       transferred = true;
+      return true;
     } catch (reason) {
       if (mounted.current && !abort.signal.aborted) {
         setError(reason instanceof Error ? reason.message : '任务打开失败，请重试。');
       }
+      return false;
     } finally {
+      signal?.removeEventListener('abort', cancel);
       if (!transferred && project) {
         if (handle) {
           handle.releaseScope();

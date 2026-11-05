@@ -19,6 +19,7 @@ spring:
         - optional:classpath:db/V004__task_visits.sql
         - classpath:db/V005__workspace_storage.sql
         - classpath:db/V006__invitation_validity.sql
+        - classpath:db/V007__workspace_collaboration.sql
   h2:
     console:
       enabled: false

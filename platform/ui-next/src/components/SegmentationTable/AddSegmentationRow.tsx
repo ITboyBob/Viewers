@@ -7,35 +7,42 @@ export const AddSegmentationRow: React.FC<{ children?: React.ReactNode }> = ({
   children = null,
 }) => {
   const { t } = useTranslation('SegmentationTable');
-
-  const { onSegmentationAdd, data, disableEditing, mode, disabled } =
-    useSegmentationTableContext('AddSegmentationRow');
-
-  const isEmpty = data.length === 0;
-
-  if (!isEmpty && mode === 'collapsed') {
+  const {
+    onSegmentationAdd,
+    data,
+    disableEditing,
+    mode,
+    disabled,
+    addSegmentationDisabled = false,
+  } = useSegmentationTableContext('AddSegmentationRow');
+  if ((data.length !== 0 && mode === 'collapsed') || disableEditing) {
     return null;
   }
-
-  if (disableEditing) {
-    return null;
-  }
-
+  const blocked = disabled || addSegmentationDisabled;
   return (
-    <div
+    <button
+      type="button"
       data-cy="addSegmentation"
-      className={`group ${disabled ? 'pointer-events-none cursor-not-allowed opacity-70' : ''}`}
-      onClick={() => !disabled && onSegmentationAdd('')}
+      disabled={blocked}
+      className={`group w-full text-left ${blocked ? 'cursor-not-allowed opacity-70 hover:opacity-50' : ''}`}
+      title={addSegmentationDisabled ? '当前工作台无新增分割权限' : undefined}
+      onClick={() => {
+        if (!blocked) {
+          onSegmentationAdd?.('');
+        }
+      }}
     >
       {children}
-      <div className="text-primary group-hover:bg-secondary-dark flex items-center rounded-[4px] pl-1 group-hover:cursor-pointer">
-        <div className="grid h-[28px] w-[28px] place-items-center">
+      <span
+        className={`text-primary flex items-center rounded-[4px] pl-1 ${blocked ? 'cursor-not-allowed' : 'group-hover:bg-secondary-dark group-hover:cursor-pointer'}`}
+      >
+        <span className="grid h-[28px] w-[28px] place-items-center">
           {disabled ? <Icons.Info /> : <Icons.Add />}
-        </div>
-        <span className="text-[13px]">
-          {t(`${disabled ? 'Segmentation Not Supported' : 'Add Segmentation'}`)}
         </span>
-      </div>
-    </div>
+        <span className="text-[13px]">
+          {t(disabled ? 'Segmentation Not Supported' : 'Add Segmentation')}
+        </span>
+      </span>
+    </button>
   );
 };

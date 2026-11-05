@@ -2,114 +2,158 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BellIcon, PersonIcon } from '@radix-ui/react-icons';
 import type {
   BusinessUserSummary,
-  CollaborationMockApi,
+  CollaborationInvitation,
+  CollaborationInvitationApi,
   InvitationDecision,
   InvitationView,
-  MockInvitation,
   NotificationItem,
   TeamInvitationApi,
 } from '@ohif/core';
 import BusinessDialog from './BusinessDialog';
 
+type Domain = 'team' | 'collaboration';
 type Props = {
   api?: TeamInvitationApi;
-  store?: CollaborationMockApi;
+  collaborationApi?: CollaborationInvitationApi;
   user: BusinessUserSummary;
   onAccepted?(): Promise<void>;
-  onRead?(count: number): void;
+  onOpenWorkspace?(taskId: string, signal?: AbortSignal): Promise<void>;
 };
-const message = (failure: unknown) =>
-  (failure as { reason?: string })?.reason === 'INVITATION_EXPIRED'
+const message = (error: unknown) =>
+  (error as { reason?: string })?.reason === 'INVITATION_EXPIRED'
     ? '邀请已过期'
-    : failure instanceof Error
-      ? failure.message
-      : '操作失败，请重试。';
-const itemKey = (item: NotificationItem) =>
-  item.kind === 'team_join' ? `team:${item.invitation.invitation_id}` : `mock:${item.mock_id}`;
-
-function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
-  const [real, setReal] = useState<InvitationView[]>([]);
-  const [mock, setMock] = useState<MockInvitation[]>([]);
-  const [realError, setRealError] = useState('');
-  const [mockError, setMockError] = useState('');
-  const [actionError, setActionError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
-  const alive = useRef(false);
-  const sequence = useRef(0);
-  const readController = useRef<AbortController>();
-  const actions = useRef(new Set<AbortController>());
-  const busy = useRef(new Set<string>());
-
+    : error instanceof Error
+      ? error.message
+      : '操作失败，请重试';
+const keyOf = (item: NotificationItem) => `${item.kind}:${item.invitation.invitation_id}`;
+function NotificationBody({
+  api,
+  collaborationApi,
+  onAccepted,
+  onOpenWorkspace,
+  onDomainRead,
+}: Props & { onDomainRead(domain: Domain, count: number): void }) {
+  const [teams, setTeams] = useState<InvitationView[]>([]),
+    [collaborations, setCollaborations] = useState<CollaborationInvitation[]>([]);
+  const [errors, setErrors] = useState<Partial<Record<Domain, string>>>({}),
+    [actionError, setActionError] = useState('');
+  const [entryErrors, setEntryErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false),
+    [pending, setPending] = useState<ReadonlySet<string>>(new Set());
+  const alive = useRef(false),
+    sequence = useRef(0),
+    readController = useRef<AbortController>();
+  const actions = useRef(new Set<AbortController>()),
+    busy = useRef(new Set<string>());
   const refresh = useCallback(async () => {
     const current = ++sequence.current;
     readController.current?.abort();
     const controller = new AbortController();
     readController.current = controller;
     setLoading(true);
-    try {
-      if (!api) {
-        throw new Error('真实通知服务不可用，不使用模拟数据替代。');
-      }
-      const result = await api.listNotifications(controller.signal);
-      if (alive.current && current === sequence.current && !controller.signal.aborted) {
-        setReal(result);
-        setRealError('');
-      }
-    } catch (failure) {
-      if (alive.current && current === sequence.current && !controller.signal.aborted) {
-        setRealError(message(failure));
-      }
-    } finally {
-      if (alive.current && current === sequence.current && !controller.signal.aborted) {
-        setLoading(false);
-      }
+    await Promise.all(
+      (['team', 'collaboration'] as const).map(async domain => {
+        try {
+          const service = domain === 'team' ? api : collaborationApi;
+          if (!service) {
+            throw new Error(`${domain === 'team' ? '团队' : '协作'}真实通知服务不可用`);
+          }
+          const records = await service.listNotifications(controller.signal);
+          if (!alive.current || controller.signal.aborted || current !== sequence.current) {
+            return;
+          }
+          if (domain === 'team') {
+            setTeams(records as InvitationView[]);
+          } else {
+            setCollaborations(records as CollaborationInvitation[]);
+          }
+          setErrors(values => ({ ...values, [domain]: '' }));
+        } catch (error) {
+          if (alive.current && !controller.signal.aborted && current === sequence.current) {
+            setErrors(values => ({ ...values, [domain]: message(error) }));
+          }
+        }
+      })
+    );
+    if (alive.current && !controller.signal.aborted && current === sequence.current) {
+      setLoading(false);
     }
-  }, [api]);
-
+  }, [api, collaborationApi]);
   useEffect(() => {
     alive.current = true;
     const activeActions = actions.current;
-    try {
-      setMock(store?.list() ?? []);
-    } catch (failure) {
-      setMockError(message(failure));
-    }
     void refresh();
     return () => {
       alive.current = false;
       readController.current?.abort();
       activeActions.forEach(controller => controller.abort());
     };
-  }, [refresh, store]);
-
+  }, [refresh]);
   useEffect(() => {
-    if (loading || realError || !api?.markRead || !real.length) return;
-    const ids = real.filter(item => item.read_at === null).map(item => item.invitation_id);
-    if (!ids.length) return;
+    if (loading) {
+      return;
+    }
     const controller = new AbortController();
-    api
-      .markRead(ids, controller.signal)
-      .then(count => {
-        if (controller.signal.aborted || !alive.current) return;
-        setReal(items =>
-          items.map(item =>
-            ids.includes(item.invitation_id) ? { ...item, read_at: new Date().toISOString() } : item
-          )
-        );
-        onRead?.(count);
-      })
-      .catch(error => {
-        if (!controller.signal.aborted && alive.current) setActionError(message(error));
-      });
+    for (const domain of ['team', 'collaboration'] as const) {
+      const service = domain === 'team' ? api : collaborationApi,
+        records = domain === 'team' ? teams : collaborations;
+      if (errors[domain] || !service?.markRead) {
+        continue;
+      }
+      const ids = records.filter(item => item.read_at === null).map(item => item.invitation_id);
+      if (!ids.length) {
+        continue;
+      }
+      service
+        .markRead(ids, controller.signal)
+        .then(count => {
+          if (!alive.current || controller.signal.aborted) {
+            return;
+          }
+          const update = <T extends InvitationView | CollaborationInvitation>(items: T[]) =>
+            items.map(item =>
+              ids.includes(item.invitation_id)
+                ? { ...item, read_at: new Date().toISOString() }
+                : item
+            );
+          if (domain === 'team') {
+            setTeams(update);
+          } else {
+            setCollaborations(update);
+          }
+          onDomainRead(domain, count);
+        })
+        .catch(error => {
+          if (alive.current && !controller.signal.aborted) {
+            setActionError(message(error));
+          }
+        });
+    }
     return () => controller.abort();
-  }, [api, real, loading, realError, onRead]);
-
-  const decide = async (
+  }, [api, collaborationApi, teams, collaborations, errors, loading, onDomainRead]);
+  const enter = async (item: CollaborationInvitation, signal: AbortSignal) => {
+    try {
+      if (!onOpenWorkspace) {
+        throw new Error('工作台加载服务不可用');
+      }
+      await onOpenWorkspace(item.task_id, signal);
+      if (alive.current && !signal.aborted) {
+        setEntryErrors(values => ({ ...values, [item.invitation_id]: '' }));
+      }
+    } catch (error) {
+      if (alive.current && !signal.aborted) {
+        setEntryErrors(values => ({
+          ...values,
+          [item.invitation_id]: `邀请已接受；工作台加载失败：${message(error)}`,
+        }));
+      }
+    }
+  };
+  const operate = async (
     item: NotificationItem,
-    decision: Exclude<InvitationDecision, 'pending'>
+    decision?: Exclude<InvitationDecision, 'pending'>
   ) => {
-    const key = itemKey(item);
+    const key = keyOf(item);
     if (busy.current.has(key)) {
       return;
     }
@@ -119,31 +163,50 @@ function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
     const controller = new AbortController();
     actions.current.add(controller);
     try {
+      if (!decision && item.kind === 'workspace_collaboration') {
+        await enter(item.invitation, controller.signal);
+        return;
+      }
+      ++sequence.current;
+      readController.current?.abort();
       if (item.kind === 'team_join') {
-        // 防止处理期间较早的列表响应把刚处理的条目覆盖为 pending。
-        ++sequence.current;
-        readController.current?.abort();
-        if (!api) {
-          throw new Error('真实通知服务不可用。');
+        if (!api || !decision) {
+          throw new Error('团队通知服务不可用');
         }
         const result = await api.decide(item.invitation.invitation_id, decision, controller.signal);
-        if (alive.current && !controller.signal.aborted) {
-          setReal(items =>
-            items.map(value => (value.invitation_id === result.invitation_id ? result : value))
-          );
-          await refresh();
-          if (decision === 'accepted') await onAccepted?.();
+        if (!alive.current || controller.signal.aborted) {
+          return;
         }
+        setTeams(items =>
+          items.map(value => (value.invitation_id === result.invitation_id ? result : value))
+        );
+        if (decision === 'accepted' && !controller.signal.aborted) {
+          await onAccepted?.();
+        }
+        await refresh();
       } else {
-        if (!store) {
-          throw new Error('协作模拟存储不可用。');
+        if (!collaborationApi) {
+          throw new Error('协作通知服务不可用');
         }
-        store.decide(item.mock_id, decision);
-        setMock(store.list());
+        const result =
+          decision === 'accepted'
+            ? (await collaborationApi.accept(item.invitation.invitation_id, controller.signal))
+                .invitation
+            : await collaborationApi.reject(item.invitation.invitation_id, controller.signal);
+        if (!alive.current || controller.signal.aborted) {
+          return;
+        }
+        setCollaborations(items =>
+          items.map(value => (value.invitation_id === result.invitation_id ? result : value))
+        );
+        setLoading(false);
+        if (decision === 'accepted') {
+          await enter(result, controller.signal);
+        }
       }
-    } catch (failure) {
+    } catch (error) {
       if (alive.current && !controller.signal.aborted) {
-        setActionError(message(failure));
+        setActionError(message(error));
       }
     } finally {
       actions.current.delete(controller);
@@ -154,21 +217,20 @@ function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
       }
     }
   };
-
   const items: NotificationItem[] = [
-    ...real.map(invitation => ({ kind: 'team_join' as const, invitation })),
-    ...mock,
+    ...teams.map(invitation => ({ kind: 'team_join' as const, invitation })),
+    ...collaborations.map(invitation => ({ kind: 'workspace_collaboration' as const, invitation })),
   ];
   return (
     <>
-      {realError || mockError || actionError ? (
+      {[errors.team, errors.collaboration, actionError].filter(Boolean).length > 0 && (
         <p
           className="business-error"
           role="alert"
         >
-          {[realError, mockError, actionError].filter(Boolean).join('；')}
+          {[errors.team, errors.collaboration, actionError].filter(Boolean).join('；')}
         </p>
-      ) : null}
+      )}
       {loading && (
         <p
           className="business-hint"
@@ -177,23 +239,21 @@ function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
           正在刷新真实通知…
         </p>
       )}
-      {!loading && !items.length && !realError && !mockError && (
+      {!loading && !items.length && !errors.team && !errors.collaboration && (
         <p className="business-hint">暂无通知</p>
       )}
       {items.map(item => {
-        const teamJoin = item.kind === 'team_join';
-        const decision = teamJoin ? item.invitation.decision : item.decision;
-        const key = itemKey(item);
-        const sender = teamJoin ? item.invitation.inviter : user;
+        const team = item.kind === 'team_join',
+          invitation = item.invitation,
+          sender = invitation.inviter,
+          key = keyOf(item);
+        const title =
+          item.kind === 'team_join' ? item.invitation.team_name : item.invitation.task_title;
         return (
           <article
             key={key}
             className="business-notification"
-            aria-label={
-              teamJoin
-                ? `入队邀请 ${item.invitation.team_name}`
-                : `协作模拟 ${item.recipient_username}`
-            }
+            aria-label={`${team ? '入队邀请' : '工作台协作邀请'} ${title}`}
           >
             {sender.avatar_url ? (
               <img
@@ -210,26 +270,25 @@ function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
               </span>
             )}
             <div className="business-person-info">
-              <strong>
-                {teamJoin ? sender.username : `协作演示：你 → ${item.recipient_username}`}
-              </strong>
-              <span>
-                {teamJoin
-                  ? `邀请你加入团队“${item.invitation.team_name}”`
-                  : '协作邀请 · 合成用户；按钮模拟接收方决定'}
-              </span>
+              <strong>{sender.username}</strong>
+              <span>{team ? `邀请你加入团队“${title}”` : `邀请你协作此工作台“${title}”`}</span>
+              {!team && entryErrors[invitation.invitation_id] && (
+                <p
+                  className="business-error"
+                  role="alert"
+                >
+                  {entryErrors[invitation.invitation_id]}
+                </p>
+              )}
             </div>
             <div className="business-notification-actions">
-              {decision === 'pending' ? (
+              {invitation.decision === 'pending' ? (
                 <>
                   <button
                     type="button"
                     className="business-action business-action-secondary"
                     disabled={pending.has(key)}
-                    aria-label={teamJoin ? '拒绝' : '模拟拒绝'}
-                    onClick={() => {
-                      void decide(item, 'rejected');
-                    }}
+                    onClick={() => void operate(item, 'rejected')}
                   >
                     拒绝
                   </button>
@@ -237,21 +296,30 @@ function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
                     type="button"
                     className="business-action"
                     disabled={pending.has(key)}
-                    aria-label={teamJoin ? '接受' : '模拟接受'}
-                    onClick={() => {
-                      void decide(item, 'accepted');
-                    }}
+                    onClick={() => void operate(item, 'accepted')}
                   >
                     接受
                   </button>
                 </>
               ) : (
-                <span
-                  className="business-notification-decision"
-                  data-decision={decision}
-                >
-                  {decision === 'accepted' ? '已接受' : '已拒绝'}
-                </span>
+                <>
+                  <span
+                    className="business-notification-decision"
+                    data-decision={invitation.decision}
+                  >
+                    {invitation.decision === 'accepted' ? '已接受' : '已拒绝'}
+                  </span>
+                  {!team && invitation.decision === 'accepted' && (
+                    <button
+                      type="button"
+                      className="business-action"
+                      disabled={pending.has(key)}
+                      onClick={() => void operate(item)}
+                    >
+                      {entryErrors[invitation.invitation_id] ? '重试进入工作台' : '进入工作台'}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </article>
@@ -260,32 +328,48 @@ function NotificationBody({ api, store, user, onAccepted, onRead }: Props) {
     </>
   );
 }
-
 export default function NotificationDialog(props: Props) {
-  const [open, setOpen] = useState(false);
-  const [unread, setUnread] = useState(0);
-  const [readError, setReadError] = useState('');
+  const [open, setOpen] = useState(false),
+    [counts, setCounts] = useState<Partial<Record<Domain, number>>>({}),
+    [readError, setReadError] = useState('');
   useEffect(() => {
-    if (!props.api?.unreadCount) return;
-    let alive = true;
-    let controller: AbortController | undefined;
-    const check = () => {
+    setCounts({});
+    setReadError('');
+  }, [props.user.uid]);
+  const mark = useCallback(
+    (domain: Domain, count: number) => setCounts(values => ({ ...values, [domain]: count })),
+    []
+  );
+  useEffect(() => {
+    let alive = true,
+      controller: AbortController | undefined;
+    const check = async () => {
       controller?.abort();
-      controller = new AbortController();
-      const current = controller;
-      props.api!.unreadCount!(current.signal)
-        .then(count => {
-          if (alive && !current.signal.aborted) {
-            setUnread(count);
-            setReadError('');
+      const abort = new AbortController();
+      controller = abort;
+      const failures: string[] = [];
+      await Promise.all(
+        (['team', 'collaboration'] as const).map(async domain => {
+          const service = domain === 'team' ? props.api : props.collaborationApi;
+          if (!service?.unreadCount) {
+            return;
+          }
+          try {
+            const count = await service.unreadCount(abort.signal);
+            if (alive && !abort.signal.aborted) {
+              mark(domain, count);
+            }
+          } catch (error) {
+            failures.push(message(error));
           }
         })
-        .catch(error => {
-          if (alive && !current.signal.aborted) setReadError(message(error));
-        });
+      );
+      if (alive && !abort.signal.aborted) {
+        setReadError(failures.join('；'));
+      }
     };
-    check();
-    const timer = setInterval(check, 30000);
+    void check();
+    const timer = setInterval(() => void check(), 30000);
     window.addEventListener('focus', check);
     return () => {
       alive = false;
@@ -293,7 +377,8 @@ export default function NotificationDialog(props: Props) {
       clearInterval(timer);
       window.removeEventListener('focus', check);
     };
-  }, [props.api, props.user.uid]);
+  }, [props.api, props.collaborationApi, props.user.uid, mark]);
+  const unread = (counts.team ?? 0) + (counts.collaboration ?? 0);
   return (
     <BusinessDialog
       title="通知"
@@ -305,25 +390,21 @@ export default function NotificationDialog(props: Props) {
           type="button"
           className="business-top-action"
           aria-label="通知"
+          title={readError || undefined}
           onClick={event => event.stopPropagation()}
         >
           <BellIcon aria-hidden="true" />
           通知
           {unread > 0 && (
             <span
+              className="business-unread-dot"
               aria-label="有未读通知"
-              style={{
-                display: 'inline-block',
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: '#ef4444',
-              }}
             />
           )}
           {readError && (
             <span
               role="status"
+              aria-label="未读状态读取失败"
               title={readError}
             >
               读取失败
@@ -334,8 +415,9 @@ export default function NotificationDialog(props: Props) {
     >
       {open && (
         <NotificationBody
+          key={props.user.uid}
           {...props}
-          onRead={setUnread}
+          onDomainRead={mark}
         />
       )}
     </BusinessDialog>

@@ -94,6 +94,44 @@ export interface TeamInvitationApi {
     signal?: AbortSignal
   ): Promise<InvitationView>;
 }
+/** 指定工作台的协作授权，与团队成员资格及全局只读分开。 */
+export type CollaborationPermission = 'edit' | 'view';
+export type CollaborationInvitation = {
+  invitation_id: string;
+  task_id: string;
+  task_title: string;
+  inviter: BusinessUserSummary;
+  invitee: { uid: string; username: string };
+  invitee_uid: string;
+  permission: CollaborationPermission;
+  decision: InvitationDecision;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+  read_at: string | null;
+};
+export type CollaborationAcceptance = {
+  invitation: CollaborationInvitation;
+  task_id: string;
+  mode_path: 'segmentation/dicomlocal' | 'microscopy';
+};
+export interface CollaborationInvitationApi {
+  send(
+    taskId: string,
+    username: string,
+    permission: CollaborationPermission,
+    signal?: AbortSignal
+  ): Promise<CollaborationInvitation>;
+  listSent(
+    taskId: string,
+    signal?: AbortSignal
+  ): Promise<{ data: CollaborationInvitation[]; server_time: string }>;
+  listNotifications(signal?: AbortSignal): Promise<CollaborationInvitation[]>;
+  unreadCount(signal?: AbortSignal): Promise<number>;
+  markRead(ids: string[], signal?: AbortSignal): Promise<number>;
+  accept(id: string, signal?: AbortSignal): Promise<CollaborationAcceptance>;
+  reject(id: string, signal?: AbortSignal): Promise<CollaborationInvitation>;
+}
 export type CollaborationRecipient = BusinessUserSummary & { synthetic: true; in_team: boolean };
 export type MockInvitation = {
   kind: 'collaboration_mock';
@@ -105,7 +143,9 @@ export type MockInvitation = {
   expires_at: number;
   decision: InvitationDecision;
 };
-export type NotificationItem = { kind: 'team_join'; invitation: InvitationView } | MockInvitation;
+export type NotificationItem =
+  | { kind: 'team_join'; invitation: InvitationView }
+  | { kind: 'workspace_collaboration'; invitation: CollaborationInvitation };
 export interface CollaborationMockApi {
   readonly recipients: readonly CollaborationRecipient[];
   list(): MockInvitation[];
@@ -144,7 +184,7 @@ export interface BusinessServices {
   taskStorage?: TaskStorageApi;
   projectRuntime?: ProjectRuntime;
   teamInvitations?: TeamInvitationApi;
-  collaborationMock?: { forUser(user: BusinessUserSummary): CollaborationMockApi };
+  collaborationInvitations?: CollaborationInvitationApi;
   localCollaboration?: LocalCollaborationServices;
   ui?: { renderHeader(options: { page: 'import' | 'viewer'; taskMembers?: boolean }): ReactNode };
 }
@@ -182,6 +222,8 @@ export type LocalProject = ImportBatch & {
   readonly importer_uid: string;
   readonly viewer_uid?: string;
   can_edit?: boolean;
+  collaboration_permission?: CollaborationPermission | null;
+  can_add_segmentation?: boolean;
   source_stored?: boolean;
   readonly team_id: string;
   readonly title: string;
@@ -508,7 +550,12 @@ export interface LocalCollaborationServices {
 }
 
 /** 后端材料与当前成果版本，文件缓存不授予身份资格。 */
-export type TaskAccess = { owner_uid: string; can_edit: boolean };
+export type TaskAccess = {
+  owner_uid: string;
+  can_edit: boolean;
+  collaboration_permission: CollaborationPermission | null;
+  can_add_segmentation: boolean;
+};
 export type SourceFileSpec = {
   file_id: string;
   selection_index: number;

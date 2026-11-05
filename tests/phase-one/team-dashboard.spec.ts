@@ -85,29 +85,13 @@ test('原成员在团队空间左边；自有团队勾选，真实空列表和�
 }, testInfo) => {
   const { session } = await register(page);
   await skip(page, session.default_team_id);
-  // 显式建立既有协作 mock 夹具；这次初始化与页面自身是否调用 forUser 分开记录。
-  const fixture = await page.evaluate(() => {
-    const w = window as unknown as {
-      services: { businessServices: BusinessServices };
-      teamPageAudit: { forUserCalls: number };
-    };
-    const business = w.services.businessServices;
-    const user = business.session.getSnapshot().context!.user;
-    const factory = business.collaborationMock!;
-    const store = factory.forUser(user);
-    const invitation = store.invite(store.recipients[0].username);
-    w.teamPageAudit = { forUserCalls: 0 };
-    const original = factory.forUser.bind(factory);
-    factory.forUser = current => {
-      w.teamPageAudit.forUserCalls++;
-      return original(current);
-    };
-    return {
-      username: invitation.recipient_username,
-      pending: store.list().filter(item => item.decision === 'pending').length,
-    };
-  });
-  expect(fixture.pending).toBe(1);
+  expect(
+    await page.evaluate(() => {
+      const services = (window as unknown as { services: { businessServices: BusinessServices } })
+        .services.businessServices;
+      return { real: !!services.collaborationInvitations, mock: 'collaborationMock' in services };
+    })
+  ).toEqual({ real: true, mock: false });
   const writes: string[] = [];
   page.on('request', request => {
     if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/v1/')) {
@@ -141,29 +125,17 @@ test('原成员在团队空间左边；自有团队勾选，真实空列表和�
   await expect(notifications.getByRole('status')).toHaveCount(0);
   await expect(notifications.getByRole('alert')).toHaveCount(0);
   await expect(notifications.getByText('暂无通知', { exact: true })).toBeVisible();
-  await expect(
-    notifications.getByRole('article', { name: `协作模拟 ${fixture.username}`, exact: true })
-  ).toHaveCount(0);
-  await expect(notifications.getByRole('button', { name: '模拟接受', exact: true })).toHaveCount(0);
-  await expect(notifications.getByRole('button', { name: '模拟拒绝', exact: true })).toHaveCount(0);
-  expect(
-    await page.evaluate(
-      () =>
-        (window as unknown as { teamPageAudit: { forUserCalls: number } }).teamPageAudit
-          .forUserCalls
-    )
-  ).toBe(0);
+  await expect(notifications.getByRole('article')).toHaveCount(0);
   await page.getByRole('button', { name: '关闭通知弹窗' }).click();
   expect(writes).toEqual([]);
   await expect(page).toHaveURL(/\/team\/tasks$/);
   await page.screenshot({ path: testInfo.outputPath('团队任务.png') });
-  // 正向控制：同一 pending 夹具在旧导入入口确实可见，防止空夹具造成负向假通过。
+  // 旧导入入口同样使用真实通知，不再暴露模拟接受或模拟拒绝。
   await page.goto('/local-mask');
   await expect(page.getByRole('button', { name: '通知', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '通知', exact: true }).click();
-  const legacy = page.getByRole('article', { name: `协作模拟 ${fixture.username}`, exact: true });
-  await expect(legacy.getByRole('button', { name: '模拟接受', exact: true })).toBeVisible();
-  await expect(legacy.getByRole('button', { name: '模拟拒绝', exact: true })).toBeVisible();
+  await expect(page.getByText('暂无通知', { exact: true })).toBeVisible();
+  await expect(page.getByText(/协作模拟|模拟接受|模拟拒绝/)).toHaveCount(0);
   await page.goto('/team/tasks');
   await expect(page.getByLabel('任务数量')).toBeVisible();
   expect(writes).toEqual([]);

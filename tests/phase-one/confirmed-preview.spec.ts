@@ -60,6 +60,7 @@ test('固定来源封面叠加整版SEG/SR/RTSTRUCT，刷新变色和删除且�
     return state({
       segmentations: [
         {
+          segmentationId: 'preview-labelmap',
           frames: [{ referenceId: `raw-${index}`, rows: 32, columns: 32, pixels }],
           colors: { 1: rgba },
           visible: { 1: false },
@@ -117,6 +118,7 @@ test('固定来源封面叠加整版SEG/SR/RTSTRUCT，刷新变色和删除且�
       value: state({
         segmentations: [
           {
+            segmentationId: 'preview-contour',
             frames: [],
             colors: {},
             contour: {},

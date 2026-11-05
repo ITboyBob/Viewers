@@ -9,7 +9,7 @@ import { TeamPageService } from './TeamPageService';
 import { ProjectRuntimeService } from './ProjectRuntimeService';
 import { BusinessSessionService } from './BusinessSessionService';
 import { TeamInvitationService } from './TeamInvitationService';
-import { CollaborationMockStore } from './mock/CollaborationMockStore';
+import { CollaborationInvitationService } from './CollaborationInvitationService';
 import { LocalParticipationIdentity } from './localCollaboration/LocalParticipationIdentity';
 import { SharedFileStore } from './localCollaboration/SharedFileStore';
 import { SharedFilePublisher } from './localCollaboration/SharedFilePublisher';
@@ -94,6 +94,7 @@ export function createBusinessServices(
     taskStorage,
     projectRuntime,
     teamInvitations: new TeamInvitationService(api),
+    collaborationInvitations: new CollaborationInvitationService(api),
   };
   if (configuration.enabled) {
     services.teamPage = new TeamPageService(api);
@@ -219,16 +220,6 @@ export function createBusinessServices(
         shared.publisher?.cancel();
       });
     }
-    const stores = new Map<string, CollaborationMockStore>();
-    const storage = dependencies.storage === undefined ? browserStorage() : dependencies.storage;
-    services.collaborationMock = {
-      forUser: user => {
-        if (!stores.has(user.uid)) {
-          stores.set(user.uid, new CollaborationMockStore(user, storage, dependencies.clock));
-        }
-        return stores.get(user.uid)!;
-      },
-    };
     services.ui = {
       renderHeader: options => React.createElement(BusinessTopBar, { ...options, services }),
     };

@@ -17,6 +17,7 @@ type Snapshot = {
   measurements: Record<string, unknown>[];
   segmentations: Array<{
     segmentationId: string;
+    entity_id?: string;
     label: string;
     segments: ToolTypes.Segmentation['segments'];
     frames: Frame[];
@@ -32,6 +33,13 @@ type Events = {
 };
 /** 只依赖原生能力契约，避免适配器反向耦合整个业务服务实现。 */
 type Services = {
+  displaySetService?: {
+    getDisplaySetByUID(
+      id: string
+    ):
+      | { SOPInstanceUID?: string; SeriesInstanceUID?: string; StudyInstanceUID?: string }
+      | undefined;
+  };
   measurementService: Events & {
     getMeasurements(): Array<{ uid: string; [key: string]: unknown }>;
     getSource(
@@ -129,6 +137,30 @@ function blockWorkspace(signal: AbortSignal) {
 
 /** 只保存数据副本，不保存服务、视口、DOM或渲染对象。 */
 export default function createProjectWorkspaceAdapter(services: Services): ProjectWorkspaceAdapter {
+  const identities = new WeakMap<LocalProject, Map<string, string>>();
+  const entityId = (project: LocalProject, runtimeId: string): string => {
+    const restored = identities.get(project)?.get(runtimeId);
+    if (restored) {
+      return restored;
+    }
+    const displaySet = services.displaySetService?.getDisplaySetByUID(runtimeId);
+    const original =
+      displaySet &&
+      project.successes.find(
+        item =>
+          item.sop_uid === displaySet.SOPInstanceUID &&
+          item.series_uid === displaySet.SeriesInstanceUID &&
+          item.study_uid === displaySet.StudyInstanceUID &&
+          [
+            '1.2.840.10008.5.1.4.1.1.66.4',
+            '1.2.840.10008.5.1.4.1.1.66.7',
+            '1.2.840.10008.5.1.4.1.1.481.3',
+          ].includes(String(item.dataset.SOPClassUID))
+      );
+    return original
+      ? `dicom:${original.study_uid}/${original.series_uid}/${original.sop_uid}`
+      : runtimeId;
+  };
   const adapter: ProjectWorkspaceAdapter = {
     isBusy: isMaskOperationActive,
     capture(project: LocalProject): Snapshot {
@@ -191,6 +223,7 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
           });
           return {
             segmentationId: mask.segmentationId,
+            entity_id: entityId(project, mask.segmentationId),
             label: mask.label,
             segments: cloneDeep(mask.segments),
             contour: cloneDeep(contour),
@@ -221,6 +254,7 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
         });
         return {
           segmentationId: mask.segmentationId,
+          entity_id: entityId(project, mask.segmentationId),
           label: mask.label,
           segments: cloneDeep(mask.segments),
           frames,
@@ -395,6 +429,10 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
         }
         check(signal);
         for (const mask of state.segmentations) {
+          if (!identities.has(project)) {
+            identities.set(project, new Map());
+          }
+          identities.get(project)!.set(mask.segmentationId, mask.entity_id ?? mask.segmentationId);
           const segments = cloneDeep(mask.segments);
           if (!Object.values(segments).some(segment => (segment as { active?: boolean }).active)) {
             const first = Object.keys(segments)

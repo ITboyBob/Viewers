@@ -7,6 +7,7 @@ import MemberOverlay from './MemberOverlay';
 import TaskMembersOverlay from './TaskMembersOverlay';
 import NotificationDialog from './NotificationDialog';
 import CollaborationInviteDialog from './CollaborationInviteDialog';
+import useOpenTask from '../../routes/Team/useOpenTask';
 import '../../routes/Account/AccountFonts.css';
 import './BusinessDialogs.css';
 import './BusinessFonts.css';
@@ -21,6 +22,7 @@ export default function BusinessTopBar({
   taskMembers?: boolean;
 }) {
   const snapshot = useBusinessSession(services.session);
+  const opener = useOpenTask(services);
   const logout = useBusinessLogout(services);
   const [, refreshSharing] = useReducer(value => value + 1, 0);
   const shared = services.localCollaboration;
@@ -42,7 +44,7 @@ export default function BusinessTopBar({
     return null;
   }
   const user = snapshot.context.user;
-  const store = services.collaborationMock?.forUser(user);
+
   return (
     <div
       className="business-topbar"
@@ -72,14 +74,20 @@ export default function BusinessTopBar({
         <NotificationDialog
           key={`notifications:${user.uid}`}
           api={services.teamInvitations}
-          store={store}
+          collaborationApi={services.collaborationInvitations}
+          onOpenWorkspace={async (taskId, signal) => {
+            if (!(await opener.open(taskId, signal))) {
+              throw new Error('原图或成果加载失败，请重试进入');
+            }
+          }}
           user={user}
         />
       )}
       {page === 'viewer' && (
         <CollaborationInviteDialog
           key={`invite:${user.uid}`}
-          store={store}
+          api={services.collaborationInvitations}
+          taskId={currentProject?.phase === 'registered' ? currentProject.task_id : undefined}
         />
       )}
       {page === 'viewer' && sharingReady && (
