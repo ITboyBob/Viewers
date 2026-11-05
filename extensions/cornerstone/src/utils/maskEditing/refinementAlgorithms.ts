@@ -7,6 +7,7 @@ export type RefinementOperation =
   | 'largest'
   | 'removeSmall'
   | 'removeSeed'
+  | 'fillCavities'
   | 'huGrow'
   | 'interpolate'
   | 'boolean'
@@ -16,6 +17,7 @@ export type RefinementOptions = {
   operation: RefinementOperation;
   radiusMm?: number;
   minimumVolumeMm3?: number;
+  maximumCavityVolumeMm3?: number;
   seed?: number[];
   useRoi?: boolean;
   replace?: boolean;
@@ -23,6 +25,7 @@ export type RefinementOptions = {
   upper?: number;
   startSlice?: number;
   endSlice?: number;
+  keyframes?: number[];
   replaceIntermediate?: boolean;
   eligibility?: Uint8Array;
   booleanOperation?: 'union' | 'intersection' | 'difference';
@@ -32,6 +35,15 @@ export type RefinementOptions = {
   cutPlane?: { normal: number[]; offset: number; keepPositive: boolean };
 };
 export type RefinementProgress = (completed: number, total: number) => void;
+export type RefinementResult = {
+  mask: Uint8Array;
+  components?: number;
+  removedComponents?: number;
+  cavities?: number;
+  eligibleCavities?: number;
+  interpolatedSlices?: number;
+  skippedSlices?: number;
+};
 export const MAX_REFINEMENT_VOXELS = 64 * 1024 * 1024;
 const INF = 1e15;
 
@@ -276,6 +288,95 @@ function componentCleaner(
   return { mask, components, removedComponents };
 }
 
+/**
+ * Fill only enclosed 3D background components. Background uses 26-connectivity:
+ * even diagonal routes to any image face stay open. Other Masks are traversable
+ * background for topology/volume, but can never be written into the result.
+ */
+function fillCavities(
+  state: Uint8Array,
+  dimensions: readonly number[],
+  spacing: readonly number[],
+  options: RefinementOptions,
+  progress?: RefinementProgress
+): RefinementResult {
+  const maximum = options.maximumCavityVolumeMm3;
+  if (maximum !== undefined && (!Number.isFinite(maximum) || maximum <= 0 || maximum > 1e9))
+    throw new Error('空腔最大体积应大于 0，且不超过 1000000000 mm³，或选择不限制体积。');
+  const [w, h, d] = dimensions,
+    plane = w * h,
+    voxelVolume = spacing[0] * spacing[1] * spacing[2],
+    maximumVoxels = maximum === undefined ? Infinity : Math.floor(maximum / voxelVolume + 1e-9),
+    marks = Uint8Array.from(state, value => (value === 1 ? 1 : 0));
+  // A ring frontier bounds memory by the current wave rather than all visited voxels.
+  let queue = new Uint32Array(Math.min(state.length, 65536)),
+    head = 0,
+    size = 0,
+    work = 0,
+    cavities = 0,
+    eligibleCavities = 0;
+  const totalWork = state.length * 3;
+  function tick() {
+    if (++work % 32768 === 0) progress?.(work, totalWork);
+  }
+  function flood(seed: number, from: number, to: number) {
+    head = 0;
+    size = 0;
+    let count = 0,
+      writable = 0,
+      exterior = false;
+    function visit(index: number) {
+      if (marks[index] !== from) return;
+      marks[index] = to;
+      count++;
+      writable += Number(state[index] === 0);
+      if (size === queue.length) {
+        const larger = new Uint32Array(Math.min(state.length, queue.length * 2));
+        for (let i = 0; i < size; i++) larger[i] = queue[(head + i) % queue.length];
+        queue = larger;
+        head = 0;
+      }
+      queue[(head + size++) % queue.length] = index;
+    }
+    visit(seed);
+    while (size) {
+      const i = queue[head];
+      head = (head + 1) % queue.length;
+      size--;
+      const x = i % w,
+        y = Math.floor(i / w) % h,
+        z = Math.floor(i / plane);
+      if (x === 0 || x === w - 1 || y === 0 || y === h - 1 || z === 0 || z === d - 1)
+        exterior = true;
+      for (let c = Math.max(0, z - 1); c <= Math.min(d - 1, z + 1); c++)
+        for (let b = Math.max(0, y - 1); b <= Math.min(h - 1, y + 1); b++)
+          for (let a = Math.max(0, x - 1); a <= Math.min(w - 1, x + 1); a++)
+            visit(a + w * b + plane * c);
+      tick();
+    }
+    return { count, writable, exterior };
+  }
+  progress?.(0, totalWork);
+  for (let seed = 0; seed < marks.length; seed++) {
+    if (marks[seed] === 0) {
+      const region = flood(seed, 0, 2);
+      if (!region.exterior && region.writable) {
+        cavities++;
+        if (region.count <= maximumVoxels) {
+          eligibleCavities++;
+          // Revisit just this component; no dense queue or component-ID volume is needed.
+          flood(seed, 2, 3);
+        }
+      }
+    }
+    tick();
+  }
+  for (let i = 0; i < marks.length; i++)
+    marks[i] = state[i] === 1 || (state[i] === 0 && marks[i] === 3) ? 1 : 0;
+  progress?.(totalWork, totalWork);
+  return { mask: marks, cavities, eligibleCavities };
+}
+
 /** Snapshot state: 0 background, 1 selected Mask, 2 protected other Masks. */
 export function refineMask(
   state: Uint8Array,
@@ -283,7 +384,7 @@ export function refineMask(
   spacing: readonly number[],
   options: RefinementOptions,
   progress?: RefinementProgress
-) {
+): RefinementResult {
   validate(state, dimensions, spacing);
   if (
     ![
@@ -295,6 +396,7 @@ export function refineMask(
       'largest',
       'removeSmall',
       'removeSeed',
+      'fillCavities',
       'huGrow',
       'interpolate',
       'boolean',
@@ -302,6 +404,8 @@ export function refineMask(
     ].includes(options?.operation)
   )
     throw new Error('未知的 Mask 精修操作。');
+  if (options.operation === 'fillCavities')
+    return fillCavities(state, dimensions, spacing, options, progress);
   if (options.operation === 'huGrow') {
     const candidates = options.eligibility;
     if (
@@ -414,7 +518,39 @@ export function refineMask(
     : morphology(state, dimensions, spacing, options, progress);
 }
 
-/** Signed in-plane distances blend two explicitly chosen labelmap keyframes. */
+export const MAX_INTERPOLATION_KEYFRAMES = 64;
+
+/** Explicit layer numbers, rather than inferred or previously interpolated contours. */
+export function parseInterpolationKeyframes(text: string): number[] {
+  const values = text.trim().split(/[,，;；\s]+/);
+  if (!text.trim() || values.some(value => !/^\d+$/.test(value)))
+    throw new Error('关键层列表应为整数层号，用逗号或空格分隔，例如 1, 5, 10。');
+  if (values.length > MAX_INTERPOLATION_KEYFRAMES)
+    throw new Error(`一次最多选择 ${MAX_INTERPOLATION_KEYFRAMES} 张关键层，请分段处理。`);
+  return values.map(Number);
+}
+
+export function interpolationKeyframes(options: RefinementOptions, depth: number): number[] {
+  const keys =
+    options.keyframes === undefined ? [options.startSlice, options.endSlice] : options.keyframes;
+  if (
+    !Array.isArray(keys) ||
+    keys.length < 2 ||
+    keys.length > MAX_INTERPOLATION_KEYFRAMES ||
+    keys.some(
+      (value, i) =>
+        !Number.isInteger(value) || value < 1 || value > depth || (i > 0 && value <= keys[i - 1])
+    )
+  )
+    throw new Error(
+      `请选择 2 至 ${MAX_INTERPOLATION_KEYFRAMES} 张有效关键层，按层号递增且不能重复。`
+    );
+  if (!keys.some((value, i) => i > 0 && value - keys[i - 1] >= 2))
+    throw new Error('关键层之间至少需要一张可插值的中间层。');
+  return [...keys];
+}
+
+/** Blend signed in-plane distances piecewise; retain only the current pair in memory. */
 function interpolateSlices(
   state: Uint8Array,
   dimensions: readonly number[],
@@ -422,15 +558,15 @@ function interpolateSlices(
   options: RefinementOptions,
   progress?: RefinementProgress
 ) {
-  const start = options.startSlice - 1,
-    end = options.endSlice - 1;
-  if (![start, end].every(Number.isInteger) || start < 0 || end >= dimensions[2] || end - start < 2)
-    throw new Error('插值需要两张至少间隔一层的有效关键层。');
+  const keys = interpolationKeyframes(options, dimensions[2]).map(value => value - 1);
   const [w, h] = dimensions,
     plane = w * h,
     dims = [w + 2, h + 2, 1];
   const count = dims[0] * dims[1];
   if (count > MAX_REFINEMENT_VOXELS) throw new Error('关键层尺寸超出插值上限。');
+  for (const layer of keys)
+    if (!state.subarray(layer * plane, (layer + 1) * plane).some(value => value === 1))
+      throw new Error(`第 ${layer + 1} 张关键层没有当前 Mask 的选区，请重新选择。`);
   function signed(layer: number) {
     const binary = new Uint8Array(count);
     let selected = 0;
@@ -454,27 +590,41 @@ function interpolateSlices(
       }
     return result;
   }
-  const first = signed(start),
-    last = signed(end);
   const mask = Uint8Array.from(state, value => (value === 1 ? 1 : 0));
-  for (let z = start + 1; z < end; z++) {
-    const offset = z * plane;
-    if (
-      !options.replaceIntermediate &&
-      state.subarray(offset, offset + plane).some(value => value === 1)
-    ) {
-      progress?.(z - start, end - start - 1);
-      continue;
+  const total = keys[keys.length - 1] - keys[0] - keys.length + 1;
+  let cached: { layer: number; distances: Float32Array },
+    interpolatedSlices = 0,
+    skippedSlices = 0;
+  progress?.(0, total);
+  for (let pair = 0; pair < keys.length - 1; pair++) {
+    const start = keys[pair],
+      end = keys[pair + 1];
+    if (end - start === 1) continue;
+    const first = cached?.layer === start ? cached.distances : signed(start),
+      last = signed(end);
+    cached = { layer: end, distances: last };
+    for (let z = start + 1; z < end; z++) {
+      const offset = z * plane;
+      if (
+        !options.replaceIntermediate &&
+        state.subarray(offset, offset + plane).some(value => value === 1)
+      ) {
+        skippedSlices++;
+      } else {
+        const weight = (z - start) / (end - start);
+        for (let i = 0; i < plane; i++)
+          if (state[offset + i] !== 2)
+            mask[offset + i] = first[i] * (1 - weight) + last[i] * weight > 0 ? 1 : 0;
+        interpolatedSlices++;
+      }
+      progress?.(interpolatedSlices + skippedSlices, total);
     }
-    const weight = (z - start) / (end - start);
-    for (let i = 0; i < plane; i++)
-      if (state[offset + i] !== 2)
-        mask[offset + i] = first[i] * (1 - weight) + last[i] * weight > 0 ? 1 : 0;
-    progress?.(z - start, end - start - 1);
   }
   return {
     mask,
     components: undefined as number | undefined,
     removedComponents: undefined as number | undefined,
+    interpolatedSlices,
+    skippedSlices,
   };
 }

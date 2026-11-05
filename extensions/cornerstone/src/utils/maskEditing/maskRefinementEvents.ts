@@ -30,11 +30,18 @@ export type MaskRefinementPreview = {
   removedComponents?: number;
   radiusMm?: number;
   minimumVolumeMm3?: number;
+  maximumCavityVolumeMm3?: number;
+  cavities?: number;
+  eligibleCavities?: number;
   roi?: boolean;
   lower?: number;
   upper?: number;
   startSlice?: number;
   endSlice?: number;
+  keyframes?: number[];
+  replaceIntermediate?: boolean;
+  interpolatedSlices?: number;
+  skippedSlices?: number;
   booleanOperation?: string;
   operandLabel?: string;
   cutOffsetMm?: number;

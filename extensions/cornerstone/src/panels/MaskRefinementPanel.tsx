@@ -9,6 +9,11 @@ import type {
   MaskRefinementTask,
 } from '../utils/maskEditing/maskRefinementEvents';
 import type { RefinementOperation } from '../utils/maskEditing/refinementAlgorithms';
+import {
+  parseInterpolationKeyframes,
+  interpolationKeyframes,
+  MAX_INTERPOLATION_KEYFRAMES,
+} from '../utils/maskEditing/refinementAlgorithms';
 import { refinementLabels } from '../utils/maskEditing/createMaskRefinementCommands';
 import { maskDraftPauseReasons } from '../utils/maskEditing/maskProgress';
 
@@ -37,6 +42,8 @@ export default function MaskRefinementPanel({
   const [operation, setOperation] = useState<RefinementOperation>('dilate');
   const [radius, setRadius] = useState('1');
   const [minimumVolume, setMinimumVolume] = useState('100');
+  const [maximumCavityVolume, setMaximumCavityVolume] = useState('1000');
+  const [unlimitedCavities, setUnlimitedCavities] = useState(false);
   const [useRoi, setUseRoi] = useState(false);
   const [huLower, setHuLower] = useState('150'),
     [huUpper, setHuUpper] = useState('2000');
@@ -44,6 +51,8 @@ export default function MaskRefinementPanel({
   const [startSlice, setStartSlice] = useState(''),
     [endSlice, setEndSlice] = useState('');
   const [replaceIntermediate, setReplaceIntermediate] = useState(false);
+  const [interpolationMode, setInterpolationMode] = useState('pair');
+  const [keyframeText, setKeyframeText] = useState('');
   const [booleanOperation, setBooleanOperation] = useState('union'),
     [operand, setOperand] = useState('');
   const [cutOffset, setCutOffset] = useState('0'),
@@ -81,6 +90,7 @@ export default function MaskRefinementPanel({
   useEffect(() => {
     setStartSlice('');
     setEndSlice('');
+    setKeyframeText('');
   }, [segmentationId, segmentIndex]);
   useEffect(() => {
     const onPreview = (event: CustomEvent<{ preview?: MaskRefinementPreview }>) => {
@@ -220,6 +230,7 @@ export default function MaskRefinementPanel({
       operation: kind,
       radiusMm: Number(radius),
       minimumVolumeMm3: Number(minimumVolume),
+      maximumCavityVolumeMm3: unlimitedCavities ? undefined : Number(maximumCavityVolume),
       useRoi: Boolean(roi && useRoi),
     };
     if (
@@ -242,6 +253,17 @@ export default function MaskRefinementPanel({
       setError('请输入大于 0 的碎片体积门槛，单位 mm³。');
       return;
     }
+    if (
+      kind === 'fillCavities' &&
+      !unlimitedCavities &&
+      (!maximumCavityVolume.trim() ||
+        !Number.isFinite(options.maximumCavityVolumeMm3) ||
+        options.maximumCavityVolumeMm3 <= 0 ||
+        options.maximumCavityVolumeMm3 > 1e9)
+    ) {
+      setError('空腔最大体积应大于 0，且不超过 1000000000 mm³，或选择不限制体积。');
+      return;
+    }
     setError('');
     run('previewMaskRefinement', options);
   }
@@ -257,6 +279,24 @@ export default function MaskRefinementPanel({
       setError('');
     } catch (error) {
       setError(error instanceof Error ? error.message : '请先选择切片窗口。');
+    }
+  }
+  function addCurrentKeyframe() {
+    try {
+      const { slice } = commandsManager.run('getMaskRefinementSliceContext');
+      const keys = [
+        ...new Set([
+          ...(keyframeText.trim() ? parseInterpolationKeyframes(keyframeText) : []),
+          slice,
+        ]),
+      ].sort((a: number, b: number) => a - b);
+      if (keys.length > MAX_INTERPOLATION_KEYFRAMES)
+        throw new Error(`一次最多选择 ${MAX_INTERPOLATION_KEYFRAMES} 张关键层，请分段处理。`);
+      discard();
+      setKeyframeText(keys.join(', '));
+      setError('');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '请先选择原始轴向切片窗口。');
     }
   }
   const number = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -314,7 +354,7 @@ export default function MaskRefinementPanel({
       </label>
       <p className="mask-help">
         {roi && useRoi
-          ? '已限定 ROI。形态学参考完整邻域，只将 ROI 内变化写入。'
+          ? '已限定 ROI。形态学与三维填洞参考完整 Mask，只将 ROI 内变化写入。'
           : '当前范围：完整 Mask。需要限定范围时先在“阈值”页框选 ROI。'}
       </p>
       <nav
@@ -324,6 +364,7 @@ export default function MaskRefinementPanel({
         {[
           ['morphology', '形态学'],
           ['cleanup', '区域清理'],
+          ['cavities', '三维填洞'],
           ['hugrow', 'HU 生长'],
           ['interpolate', '插值'],
           ['cut', '切面'],
@@ -337,6 +378,7 @@ export default function MaskRefinementPanel({
             aria-pressed={section === id}
             onClick={() => {
               commandsManager.run('setToolActiveToolbar', { toolName: 'WindowLevel' });
+              setError('');
               setSection(id);
             }}
           >
@@ -453,7 +495,58 @@ export default function MaskRefinementPanel({
         <p className="mask-help">
           按三维六邻接判断连通；点选会包含与点击处相连的所有层。体积恰好等于门槛的区域保留。
         </p>
-        {error && <p className="text-xs text-red-300">{error}</p>}
+      </div>
+      <div
+        hidden={section !== 'cavities'}
+        aria-label="三维填洞工具组"
+      >
+        <h4>三维封闭空腔填充</h4>
+        <p className="mask-help">
+          检查整组切片，只填当前 Mask 完全包围的空腔。通向任一影像外缘的通道（含对角连通）保留。
+        </p>
+        <label className="mask-control-label">
+          仅填体积不超过（mm³）
+          <input
+            aria-label="空腔最大体积 mm3"
+            type="number"
+            min="0.001"
+            max="1000000000"
+            step="1"
+            className="mask-input"
+            value={maximumCavityVolume}
+            disabled={!enabled || busy || unlimitedCavities}
+            onChange={event => {
+              discard();
+              setMaximumCavityVolume(event.target.value);
+            }}
+          />
+        </label>
+        <label className="flex items-start gap-2 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            aria-label="三维填洞不限制体积"
+            checked={unlimitedCavities}
+            disabled={!enabled || busy}
+            onChange={event => {
+              discard();
+              setUnlimitedCavities(event.target.checked);
+            }}
+          />
+          不限制空腔体积
+        </label>
+        <p className="mask-help">
+          背景按 26 邻接判断；体积包含腔内其他 Mask，但这些像素不会被覆盖。体积等于门槛时也会填充。
+          ROI 只限制写入，不能把开放通道变成封闭空腔。
+        </p>
+        <button
+          type="button"
+          className="mask-action w-full"
+          disabled={!enabled || busy}
+          onClick={() => prepare('fillCavities')}
+        >
+          预览三维空腔填充
+        </button>
+        <p className="mask-help">下方绿色区域为预计填充；检查应保留的解剖空腔后再应用。</p>
       </div>
       <div
         hidden={section !== 'hugrow'}
@@ -547,55 +640,124 @@ export default function MaskRefinementPanel({
       >
         <h4>关键层插值</h4>
         <p className="mask-help">
-          在原始切片画好两张关键层，用当前层设置起止位置；按原始体层号插值，只改中间层，关键层保持不变。
+          在原始切片画好关键层；按相邻关键层逐段补齐中间层。所有指定关键层保持不变。
         </p>
-        <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
-          <label>
-            起始关键层
-            <input
-              type="number"
-              min="1"
-              className="mask-input"
-              aria-label="插值起始关键层"
-              value={startSlice}
+        <label className="mask-control-label">
+          关键层方式
+          <select
+            aria-label="插值关键层方式"
+            className="mask-input"
+            disabled={!enabled || busy}
+            value={interpolationMode}
+            onChange={event => {
+              discard();
+              setError('');
+              setInterpolationMode(event.target.value);
+            }}
+          >
+            <option value="pair">两张关键层</option>
+            <option value="multiple">多张关键层 · 逐段插值</option>
+          </select>
+        </label>
+        <div hidden={interpolationMode !== 'pair'}>
+          <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
+            <label>
+              起始关键层
+              <input
+                type="number"
+                min="1"
+                className="mask-input"
+                aria-label="插值起始关键层"
+                value={startSlice}
+                disabled={!enabled || busy}
+                onChange={e => {
+                  discard();
+                  setStartSlice(e.target.value);
+                }}
+              />
+            </label>
+            <label>
+              结束关键层
+              <input
+                type="number"
+                min="1"
+                className="mask-input"
+                aria-label="插值结束关键层"
+                value={endSlice}
+                disabled={!enabled || busy}
+                onChange={e => {
+                  discard();
+                  setEndSlice(e.target.value);
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="mask-action"
               disabled={!enabled || busy}
-              onChange={e => {
+              onClick={() => captureSlice(false)}
+            >
+              当前层设为起始
+            </button>
+            <button
+              type="button"
+              className="mask-action"
+              disabled={!enabled || busy}
+              onClick={() => captureSlice(true)}
+            >
+              当前层设为结束
+            </button>
+          </div>
+        </div>
+        <div
+          hidden={interpolationMode !== 'multiple'}
+          className="space-y-2"
+        >
+          <label className="mask-control-label">
+            关键层列表（按层号递增）
+            <textarea
+              aria-label="插值关键层列表"
+              className="mask-input"
+              rows={2}
+              placeholder="例如 1, 5, 10, 18"
+              value={keyframeText}
+              disabled={!enabled || busy}
+              onChange={event => {
                 discard();
-                setStartSlice(e.target.value);
+                setKeyframeText(event.target.value);
               }}
             />
           </label>
-          <label>
-            结束关键层
-            <input
-              type="number"
-              min="1"
-              className="mask-input"
-              aria-label="插值结束关键层"
-              value={endSlice}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              className="mask-action"
               disabled={!enabled || busy}
-              onChange={e => {
+              onClick={addCurrentKeyframe}
+            >
+              添加当前层为关键层
+            </button>
+            <button
+              type="button"
+              className="mask-action"
+              disabled={!enabled || busy}
+              onClick={async () => {
                 discard();
-                setEndSlice(e.target.value);
+                setError('');
+                const result = await run('getMaskInterpolationKeyframes');
+                if (!result?.keyframes) return;
+                setKeyframeText(result.keyframes.join(', '));
+                if (result.keyframes.length < 2)
+                  setError('当前 Mask 不足两张已标注关键层，请先绘制选区或手动添加层号。');
               }}
-            />
-          </label>
-          <button
-            type="button"
-            className="mask-action"
-            disabled={!enabled || busy}
-            onClick={() => captureSlice(false)}
-          >
-            当前层设为起始
-          </button>
-          <button
-            type="button"
-            className="mask-action"
-            disabled={!enabled || busy}
-            onClick={() => captureSlice(true)}
-          >
-            当前层设为结束
-          </button>
+            >
+              读取当前 Mask 已标注层
+            </button>
+          </div>
+          <p className="mask-help">
+            可输入逗号、中文逗号或空格分隔的层号，最多 {MAX_INTERPOLATION_KEYFRAMES} 张。
+            读取结果也包含以前插值产生的层，请确认列表；每张关键层都必须有当前 Mask 选区。
+          </p>
         </div>
         <label className="flex gap-2 text-xs text-gray-300">
           <input
@@ -615,17 +777,25 @@ export default function MaskRefinementPanel({
           className="mask-action w-full"
           disabled={!enabled || busy}
           onClick={() => {
-            const a = Number(startSlice),
-              b = Number(endSlice);
-            if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b - a < 2) {
-              setError('请选两张至少间隔一层的关键层。');
+            let keys: number[];
+            try {
+              keys = interpolationKeyframes(
+                {
+                  operation: 'interpolate',
+                  ...(interpolationMode === 'multiple'
+                    ? { keyframes: parseInterpolationKeyframes(keyframeText) }
+                    : { startSlice: Number(startSlice), endSlice: Number(endSlice) }),
+                },
+                Infinity
+              );
+            } catch (error) {
+              setError(error instanceof Error ? error.message : '请选择有效关键层。');
               return;
             }
             setError('');
             run('previewMaskRefinement', {
               operation: 'interpolate',
-              startSlice: a,
-              endSlice: b,
+              keyframes: keys,
               replaceIntermediate,
               useRoi: Boolean(roi && useRoi),
             });
@@ -777,6 +947,14 @@ export default function MaskRefinementPanel({
           预览 Mask 布尔运算
         </button>
       </div>
+      {error && (
+        <p
+          role="alert"
+          className="text-xs text-red-300"
+        >
+          {error}
+        </p>
+      )}
       {preview && (
         <div
           role="region"
@@ -806,6 +984,30 @@ export default function MaskRefinementPanel({
               共 {number(preview.components)} 个连通区域；预计删除{' '}
               {number(preview.removedComponents)} 个
             </p>
+          )}
+          {preview.cavities !== undefined && (
+            <p data-testid="cavity-counts">
+              全组封闭空腔 {number(preview.cavities)} 处；符合体积门槛{' '}
+              {number(preview.eligibleCavities)} 处
+              {preview.roi ? '；ROI 限制后的实际新增量见上方' : ''}。
+              {preview.maximumCavityVolumeMm3 === undefined
+                ? '不限制体积。'
+                : `最大体积 ${number(preview.maximumCavityVolumeMm3)} mm³（含等于）。`}
+            </p>
+          )}
+          {preview.operation === 'interpolate' && (
+            <div data-testid="interpolation-summary">
+              <p>
+                关键层 {(preview.keyframes || [preview.startSlice, preview.endSlice]).length} 张：
+                {(preview.keyframes || [preview.startSlice, preview.endSlice]).join(', ')}
+                ；全部保留。
+              </p>
+              <p>
+                全组分析：计算 {preview.interpolatedSlices} 层，跳过已有标注 {preview.skippedSlices}{' '}
+                层。
+              </p>
+              {preview.roi && <p>ROI 限制后的实际增删量见上方。</p>}
+            </div>
           )}
           <p className="text-gray-400">
             绿色新增、品红删除；尚未修改 Mask。可滚动切片或在 MPR 查看，三维模型在应用后更新。

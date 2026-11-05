@@ -27,6 +27,8 @@ const browser = [
   ['project', 'verify-mask-project.cjs'],
   ['roi-and-drafts', 'verify-mask-safety.cjs'],
   ['refinement', 'verify-mask-refinement.cjs'],
+  ['cavities', 'verify-mask-cavities.cjs'],
+  ['interpolation', 'verify-mask-interpolation.cjs'],
   ['refinement-cancel', 'verify-refinement-cancel.cjs'],
   ['frontend-workflow', 'verify-mask-frontend.cjs'],
   ['workspace-and-history', 'verify-mask-workspace.cjs'],
@@ -52,6 +54,8 @@ const steps = [
     ['real-project', 'verify-mask-project.cjs'],
     ['real-roi-and-drafts', 'verify-mask-safety.cjs'],
     ['real-refinement', 'verify-mask-refinement.cjs'],
+    ['real-cavities', 'verify-mask-cavities.cjs'],
+    ['real-interpolation', 'verify-mask-interpolation.cjs'],
     ['real-frontend-workflow', 'verify-mask-frontend.cjs'],
     ['real-workspace-and-history', 'verify-mask-workspace.cjs'],
   ].map(([name, script]) => ({

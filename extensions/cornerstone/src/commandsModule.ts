@@ -2723,6 +2723,7 @@ function commandsModule({
     restoreMaskVisibility: actions.restoreMaskVisibility,
     hasMaskVisibilitySnapshot: actions.hasMaskVisibilitySnapshot,
     getMaskRefinementSliceContext: actions.getMaskRefinementSliceContext,
+    getMaskInterpolationKeyframes: actions.getMaskInterpolationKeyframes,
     configureMaskHuGrow: actions.configureMaskHuGrow,
     previewMaskHuGrowFromSeed: actions.previewMaskHuGrowFromSeed,
     cloneCurrentMask: actions.cloneCurrentMask,

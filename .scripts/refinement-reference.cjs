@@ -4,6 +4,63 @@ function refinementReference(state, dimensions, spacing, options) {
   const [width, height, depth] = dimensions,
     total = state.length,
     plane = width * height;
+  if (operation === 'fillCavities') {
+    // Independent dense component scan: retain the complete queue for each region.
+    const visited = new Uint8Array(total),
+      queue = new Uint32Array(total),
+      output = state.slice();
+    let cavities = 0,
+      eligibleCavities = 0;
+    for (let seed = 0; seed < total; seed++) {
+      if (state[seed] === 1 || visited[seed]) continue;
+      let head = 0,
+        tail = 1,
+        exterior = false,
+        writable = 0;
+      queue[0] = seed;
+      visited[seed] = 1;
+      while (head < tail) {
+        const i = queue[head++],
+          x = i % width,
+          y = Math.floor(i / width) % height,
+          z = Math.floor(i / plane);
+        writable += state[i] === 0;
+        exterior ||= [x, y, z].some((v, axis) => v === 0 || v === dimensions[axis] - 1);
+        for (let dz = -1; dz <= 1; dz++)
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const a = x + dx,
+                b = y + dy,
+                c = z + dz,
+                j = a + width * (b + height * c);
+              if (
+                a >= 0 &&
+                a < width &&
+                b >= 0 &&
+                b < height &&
+                c >= 0 &&
+                c < depth &&
+                !visited[j] &&
+                state[j] !== 1
+              ) {
+                visited[j] = 1;
+                queue[tail++] = j;
+              }
+            }
+      }
+      if (exterior || !writable) continue;
+      cavities++;
+      const volume = tail * spacing.reduce((a, b) => a * b, 1);
+      if (
+        options.maximumCavityVolumeMm3 === undefined ||
+        volume <= options.maximumCavityVolumeMm3 + 1e-9
+      ) {
+        eligibleCavities++;
+        for (let j = 0; j < tail; j++) if (state[queue[j]] === 0) output[queue[j]] = 1;
+      }
+    }
+    return { output, cavities, eligibleCavities };
+  }
   if (['largest', 'removeSmall', 'removeSeed'].includes(operation)) {
     const visited = new Uint8Array(total),
       output = state.slice(),

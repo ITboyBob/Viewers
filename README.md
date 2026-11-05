@@ -12,6 +12,8 @@
 最新的 ROI 保存、HU 生长、插值、三维切面和重叠 Mask 布尔操作见 [纯前端流程扩展](FRONTEND_WORKFLOW_NOTES.md)。
 这轮新增流程及 22 项完整检查的结果见 [纯前端验证报告](FRONTEND_VALIDATION_REPORT.md)。
 完整项目一次保存恢复、分组工具箱与实际编辑历史见 [项目工作流说明](PROJECT_WORKFLOW_NOTES.md)。
+最新的三维空腔填充、与逐片填洞的区别及验证结果见 [三维填洞说明](CAVITY_FILL_NOTES.md)。
+多关键层插值、候选层读取、处理层数和本轮验证见 [多关键层插值说明](INTERPOLATION_NOTES.md)。
 公开真实 CT 的验证结果与重跑方式见 [真实 DICOM 测试报告](REAL_DICOM_TEST_REPORT.md)。
 
 ---

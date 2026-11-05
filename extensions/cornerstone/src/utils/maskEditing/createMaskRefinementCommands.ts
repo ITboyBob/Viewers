@@ -1,6 +1,11 @@
 import { utilities, cache, imageLoader, metaData } from '@cornerstonejs/core';
 import { utilities as toolUtilities, segmentation } from '@cornerstonejs/tools';
-import { refineMask, MAX_REFINEMENT_VOXELS } from './refinementAlgorithms';
+import {
+  refineMask,
+  MAX_REFINEMENT_VOXELS,
+  MAX_INTERPOLATION_KEYFRAMES,
+  interpolationKeyframes,
+} from './refinementAlgorithms';
 import type { RefinementOptions } from './refinementAlgorithms';
 import { publishRefinementPreview, publishRefinementTask } from './maskRefinementEvents';
 import type { MaskRefinementPreview, MaskRefinementTask } from './maskRefinementEvents';
@@ -17,6 +22,7 @@ export const refinementLabels = {
   largest: '保留最大连通区域',
   removeSmall: '删除小碎片',
   removeSeed: '点选删除连通区域',
+  fillCavities: '三维空腔填充',
   huGrow: 'HU 灰度区域生长',
   interpolate: '关键层插值',
   boolean: 'Mask 布尔运算',
@@ -306,6 +312,11 @@ export default function createMaskRefinementCommands({
           }
           check(task);
           const parameters = { ...options };
+          if (parameters.operation === 'interpolate') {
+            parameters.keyframes = interpolationKeyframes(parameters, dimensions[2]);
+            parameters.startSlice = parameters.keyframes[0];
+            parameters.endSlice = parameters.keyframes[parameters.keyframes.length - 1];
+          }
           let operand: { segmentationId: string; segmentIndex: number; mask: Uint8Array };
           if (parameters.operation === 'cut' && parameters.cutFromView) {
             const camera = target.viewport.getCamera(),
@@ -572,11 +583,18 @@ export default function createMaskRefinementCommands({
             removedComponents: result.removedComponents,
             radiusMm: options.radiusMm,
             minimumVolumeMm3: options.minimumVolumeMm3,
+            maximumCavityVolumeMm3: options.maximumCavityVolumeMm3,
+            cavities: result.cavities,
+            eligibleCavities: result.eligibleCavities,
             roi: Boolean(roi),
             lower: options.lower,
             upper: options.upper,
-            startSlice: options.startSlice,
-            endSlice: options.endSlice,
+            startSlice: parameters.startSlice,
+            endSlice: parameters.endSlice,
+            keyframes: parameters.keyframes,
+            replaceIntermediate: options.replaceIntermediate,
+            interpolatedSlices: result.interpolatedSlices,
+            skippedSlices: result.skippedSlices,
             booleanOperation: options.booleanOperation,
             operandLabel: operand
               ? `${service.getSegmentation(operand.segmentationId)?.label || '标注集'} / ${service.getSegmentation(operand.segmentationId)?.segments[operand.segmentIndex]?.label || 'Mask'}`
@@ -686,9 +704,22 @@ export default function createMaskRefinementCommands({
                 : {}),
               ...(p.operation === 'huGrow' ? { '下限 HU': p.lower, '上限 HU': p.upper } : {}),
               ...(p.operation === 'interpolate'
-                ? { 起始层: p.startSlice, 结束层: p.endSlice }
+                ? {
+                    起始层: p.startSlice,
+                    结束层: p.endSlice,
+                    关键层: p.keyframes?.join(', ') || `${p.startSlice}, ${p.endSlice}`,
+                    已有中间层: p.replaceIntermediate ? '替换（关键层保留）' : '跳过',
+                    '计算层数 / 跳过层数': `${p.interpolatedSlices} / ${p.skippedSlices}`,
+                  }
                 : {}),
               ...(p.operation === 'removeSmall' ? { '最小体积 mm³': p.minimumVolumeMm3 } : {}),
+              ...(p.operation === 'fillCavities'
+                ? {
+                    '空腔最大体积 mm³': p.maximumCavityVolumeMm3 ?? '不限制',
+                    '全组封闭空腔 / 符合门槛': `${p.cavities} / ${p.eligibleCavities}`,
+                    背景连通: '26 邻接',
+                  }
+                : {}),
               ...(p.operation === 'boolean'
                 ? { 运算: p.booleanOperation, '源 Mask': p.operandLabel }
                 : {}),
@@ -726,6 +757,42 @@ export default function createMaskRefinementCommands({
     },
     discardMaskRefinementPreview: discard,
     cancelMaskRefinementCalculation: cancel,
+    getMaskInterpolationKeyframes: () =>
+      exclusive('正在读取当前 Mask 的已标注层…', async () => {
+        const target = targetFor(),
+          volume = maskVolumeFor(target),
+          [w, h, depth] = volume.dimensions,
+          plane = w * h;
+        if (plane * depth > MAX_REFINEMENT_VOXELS)
+          throw new Error('当前 Mask 超出本地精修处理上限，请分段选择关键层。');
+        const keyframes: number[] = [];
+        let yieldAt = performance.now() + 20;
+        for (let z = 0; z < depth; z++) {
+          for (let i = z * plane; i < (z + 1) * plane; i++) {
+            if (volume.voxelManager.getAtIndex(i) === target.segmentIndex) {
+              keyframes.push(z + 1);
+              break;
+            }
+          }
+          if (keyframes.length > MAX_INTERPOLATION_KEYFRAMES)
+            throw new Error(
+              `已标注层超过 ${MAX_INTERPOLATION_KEYFRAMES} 张，请手动选择最多 ${MAX_INTERPOLATION_KEYFRAMES} 张关键层。`
+            );
+          if (performance.now() >= yieldAt) {
+            ensureTarget(target);
+            reportMaskOperation('progress', `正在读取已标注层：${z + 1} / ${depth}…`);
+            await pause();
+            yieldAt = performance.now() + 20;
+          }
+        }
+        ensureTarget(target);
+        return {
+          changed: 0,
+          keyframes,
+          total: depth,
+          message: `读取到 ${keyframes.length} 张已标注层，请确认关键层列表后再预览。`,
+        };
+      }),
     getMaskRefinementSliceContext: () => {
       const target = targetFor(),
         volume = maskVolumeFor(target);

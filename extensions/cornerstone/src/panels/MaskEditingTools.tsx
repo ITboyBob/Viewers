@@ -671,7 +671,10 @@ export default function MaskEditingTools() {
           >
             {fillScope === 'series' ? 'Fill Holes 逐片填洞（整组）' : 'Fill Holes 填洞（单片）'}
           </button>
-          <p className="mask-help">填充每张切片中封闭的空白，不覆盖其他 Mask。该操作可撤销。</p>
+          <p className="mask-help">
+            按二维轮廓逐片填充，不覆盖其他
+            Mask。该操作可撤销。仅填立体封闭空腔时，使用下方“三维填洞”。
+          </p>
         </div>
         <MaskRefinementPanel
           servicesManager={servicesManager}

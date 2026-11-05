@@ -555,6 +555,62 @@ test('whole-series filling rolls back earlier slices if the mask becomes locked'
   assert.equal(history.length, 0);
 });
 
+test('reading keyframe layers is read-only and ignores other Mask pixels', async () => {
+  const f = setup([
+    [1, 0],
+    [2, 0],
+  ]);
+  assert.deepEqual((await f.commands.getMaskInterpolationKeyframes()).keyframes, [1]);
+  f.segmentIndex = 2;
+  assert.deepEqual((await f.commands.getMaskInterpolationKeyframes()).keyframes, [2]);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [2, 0],
+    ]
+  );
+  assert.equal(history.length, 0);
+});
+test('keyframe discovery rejects more than 64 layers without truncation or edits', async () => {
+  const f = setup(Array.from({ length: 65 }, () => [1, 0]));
+  f.volume.dimensions[2] = 65;
+  await assert.rejects(f.commands.getMaskInterpolationKeyframes(), /超过 64/);
+  assert.equal(history.length, 0);
+});
+test('multiple keyframe interpolation publishes statistics and applies as one undoable edit', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+    [1, 0],
+    [0, 0],
+    [1, 0],
+  ]);
+  f.volume.dimensions[2] = 5;
+  const original = f.pixels.map(v => [...v]);
+  const { preview } = await f.commands.previewMaskRefinement({
+    operation: 'interpolate',
+    keyframes: [1, 3, 5],
+  });
+  assert.deepEqual(preview.keyframes, [1, 3, 5]);
+  assert.equal(preview.interpolatedSlices, 2);
+  assert.equal(preview.skippedSlices, 0);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    original
+  );
+  await f.commands.applyMaskRefinement({ previewId: preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    Array.from({ length: 5 }, () => [1, 0])
+  );
+  assert.equal(history.length, 1);
+  history[0].restoreMemo(true);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    original
+  );
+});
 test('3D morphology preview is read-only and applying it protects other masks with one undo/redo', async () => {
   const f = setup([
     [1, 0],

@@ -37,6 +37,7 @@
     "test:mask-project": "node .scripts/verify-mask-project.cjs",
     "test:mask-safety": "node .scripts/verify-mask-safety.cjs",
     "test:mask-refinement": "node .scripts/verify-mask-refinement.cjs",
+    "test:mask-cavities": "node .scripts/verify-mask-cavities.cjs",
     "test:mask-refinement-cancel": "node .scripts/verify-refinement-cancel.cjs",
     "test:mask-frontend": "node .scripts/verify-mask-frontend.cjs",
     "test:mask-workspace": "node .scripts/verify-mask-workspace.cjs",
@@ -44,7 +45,7 @@
     "demo:real-data": "node .scripts/fetch-real-dicom.cjs",
     "test:mask-real": "node .scripts/verify-real-dicom.cjs",
     "dev:mask": "cross-env APP_CONFIG=config/mask-demo.js yarn dev",
-    "test:mask-editing": "node --experimental-strip-types --test .scripts/tests/mask-editing.test.cjs .scripts/tests/mask-commands.test.cjs .scripts/tests/sphere-tool-support.test.cjs .scripts/tests/volume-mask.test.cjs .scripts/tests/volume-commands.test.cjs .scripts/tests/segmentation-export.test.cjs .scripts/tests/segment-statistics.test.cjs .scripts/tests/mask-project.test.cjs .scripts/tests/mask-safety.test.cjs .scripts/tests/mask-refinement.test.cjs .scripts/tests/mask-workspace.test.cjs .scripts/tests/mask-history.test.cjs .scripts/tests/mask-render-queue.test.cjs",
+    "test:mask-editing": "node --experimental-strip-types --test .scripts/tests/mask-editing.test.cjs .scripts/tests/mask-commands.test.cjs .scripts/tests/sphere-tool-support.test.cjs .scripts/tests/volume-mask.test.cjs .scripts/tests/volume-commands.test.cjs .scripts/tests/segmentation-export.test.cjs .scripts/tests/segment-statistics.test.cjs .scripts/tests/mask-project.test.cjs .scripts/tests/mask-safety.test.cjs .scripts/tests/mask-refinement.test.cjs .scripts/tests/mask-interpolation.test.cjs .scripts/tests/mask-cavities.test.cjs .scripts/tests/mask-workspace.test.cjs .scripts/tests/mask-history.test.cjs .scripts/tests/mask-render-queue.test.cjs",
     "cm": "npx git-cz",
     "build": "lerna run build:viewer --stream",
     "build:dev": "lerna run build:dev --stream",
@@ -95,7 +96,8 @@
     "lerna:cache": "./netlify-lerna-cache.sh",
     "lerna:restore": "./netlify-lerna-restore.sh",
     "lerna:customVersion": "node version.mjs",
-    "link-list": "npm ls --depth=0 --link=true"
+    "link-list": "npm ls --depth=0 --link=true",
+    "test:mask-interpolation": "node .scripts/verify-mask-interpolation.cjs"
   },
   "dependencies": {
     "execa": "8.0.1"
