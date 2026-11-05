@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { BusinessServices } from '@ohif/core';
 import useBusinessSession, { useBusinessServices } from '../../business/useBusinessSession';
@@ -10,6 +10,8 @@ import type { TeamPageView } from './TeamPage';
 import CreateTaskButton from './CreateTaskButton';
 import useOpenTask from './useOpenTask';
 import TaskPreview from './TaskPreview';
+import TeamListOverlay from '../../business/components/TeamListOverlay';
+import TeamMemberActions from '../../business/components/TeamMemberActions';
 import useBusinessLogout from '../../business/useBusinessLogout';
 
 function ConnectedTeamPage({ services, view }: { services: BusinessServices; view: TeamPageView }) {
@@ -24,15 +26,83 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
       team.owner_uid === context.user.uid &&
       team.role === 'owner'
   );
+  const currentTeam = context?.memberships.find(team => team.team_id === snapshot.currentTeamId);
+  const [contextError, setContextError] = useState('');
+  const recoverTeam = useCallback(() => {
+    const current = services.session.getSnapshot();
+    if (
+      current.context?.user.uid !== context?.user.uid ||
+      current.currentTeamId !== snapshot.currentTeamId
+    )
+      return;
+    void (services.session.refreshContext?.() ?? services.session.validateCurrent())
+      .then(() => setContextError(''))
+      .catch(() => setContextError('团队资格恢复失败，请重试。'));
+  }, [services, context?.user.uid, snapshot.currentTeamId]);
+  const selectTeam = async (id: string) => {
+    if (!services.session.selectTeam) throw new Error('团队选择服务不可用');
+    let updated;
+    try {
+      updated = await services.session.selectTeam(id);
+    } catch (failure) {
+      const current = services.session.getSnapshot();
+      if (
+        (failure as { status?: number })?.status === 404 &&
+        current.context?.user.uid === context?.user.uid &&
+        current.currentTeamId === snapshot.currentTeamId
+      )
+        recoverTeam();
+      throw failure;
+    }
+    if (updated.context?.user.uid !== context?.user.uid || updated.currentTeamId !== id)
+      throw new Error('团队切换已取消');
+    navigate('/team/tasks');
+  };
   return (
     <TeamPageContainer
+      teamSelectorSlot={
+        context &&
+        currentTeam && (
+          <TeamListOverlay
+            key={context.user.uid}
+            teams={context.memberships}
+            currentTeamId={snapshot.currentTeamId}
+            onSelect={selectTeam}
+            trigger={
+              <button
+                type="button"
+                className="team-page-team-switch"
+                aria-label={`切换团队：${currentTeam.name}`}
+              >
+                {currentTeam.name} ▾
+              </button>
+            }
+          />
+        )
+      }
+      teamActionsSlot={
+        context &&
+        currentTeam && (
+          <TeamMemberActions
+            key={`${context.user.uid}:${currentTeam.team_id}`}
+            teamId={currentTeam.team_id}
+            api={services.teamInvitations}
+            onContextLost={recoverTeam}
+          />
+        )
+      }
       view={view}
       services={services}
       onOpenTask={opener.open}
       openingTaskId={opener.opening}
-      renderPreview={taskId => (
+      renderPreview={(taskId, generation) => (
         <TaskPreview
           taskId={taskId}
+          accountUid={context?.user.uid ?? ''}
+          permissionKey={JSON.stringify(context?.memberships)}
+          refreshKey={generation}
+          onOpen={() => opener.open(taskId)}
+          opening={!!opener.opening}
           services={services}
         />
       )}
@@ -41,6 +111,17 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
       }
       taskStatusSlot={
         <>
+          {contextError && (
+            <p role="alert">
+              {contextError}
+              <button
+                type="button"
+                onClick={recoverTeam}
+              >
+                重试恢复团队
+              </button>
+            </p>
+          )}
           {opener.opening && <p role="status">正在打开任务…</p>}
           {opener.error && <p role="alert">{opener.error}</p>}
         </>
@@ -68,10 +149,7 @@ function ConnectedTeamPage({ services, view }: { services: BusinessServices; vie
             ownedTeam={ownedTeam}
             teams={context.memberships}
             currentTeamId={snapshot.currentTeamId}
-            onSelectTeam={async id => {
-              await services.session.selectTeam?.(id);
-              navigate('/team/tasks');
-            }}
+            onSelectTeam={selectTeam}
           />
         )
       }

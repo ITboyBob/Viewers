@@ -1,3 +1,4 @@
+import { isImportComplete, workspaceReady } from './businessImport';
 import { test, expect, chromium, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -96,7 +97,7 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
     const sent = page.waitForResponse(
       r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/invitations')
     );
-    await page.getByRole('button', { name: '完成', exact: true }).click();
+    await page.getByRole('button', { name: '邀请', exact: true }).click();
     const invitationResponse = await sent;
     expect(invitationResponse.status()).toBe(201);
     const invitation: InvitationView = (await invitationResponse.json()).data;
@@ -151,7 +152,44 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
       pending.add(reading);
       void reading.catch(error => errors.push(error)).finally(() => pending.delete(reading));
     });
-    // 从选文件之前开始，初始化广播也是新Task的合法事件。
+    await page.addLocatorHandler(
+      page.getByRole('button', { name: 'Confirm and hide', exact: true }),
+      l => l.click()
+    );
+    const sample = syntheticSeries();
+    sample.files[0].name = 'GF首个成功.dcm';
+    const registered = page.waitForResponse(
+      r => r.request().method() === 'POST' && isImportComplete(r.url())
+    );
+    const files = [
+      ...sample.files,
+      {
+        name: 'GF坏.dcm',
+        mimeType: 'application/dicom',
+        buffer: Buffer.from('invalid-synthetic-dicom'),
+      },
+    ];
+    const response = await test.step('真实批次上传并完成任务登记', async () => {
+      await page.getByLabel('导入文件', { exact: true }).setInputFiles(files);
+      return registered;
+    });
+    expect(response.status()).toBe(200);
+    const task: BusinessTask = (await response.json()).data;
+    expect(task).toEqual(
+      expect.objectContaining({
+        task_id: expect.any(String),
+        team_id: owner.default_team_id,
+        assignee_uid: owner.user.uid,
+        title: 'GF首个成功.dcm',
+        metadata: {},
+      })
+    );
+    expect(task.task_id).toBeTruthy();
+    expect(response.request().postDataJSON()).toBeNull();
+    await expect(page).toHaveURL(new RegExp(`StudyInstanceUIDs=${sample.study}`));
+    await expect(page.locator('.cornerstone-viewport-element').first()).toBeVisible();
+    await test.step('原生模式初始化与已确认成果基线就绪', () => workspaceReady(page));
+    // 只审计正式就绪后当前任务的有效业务事件。
     await page.evaluate(() => {
       const w = window as unknown as GFWindow;
       const audit: GFWindow['gfAudit'] = { events: [], stop: () => {} };
@@ -169,40 +207,6 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
       audit.stop = () => subscriptions.forEach(subscription => subscription.unsubscribe());
       w.gfAudit = audit;
     });
-    await page.addLocatorHandler(
-      page.getByRole('button', { name: 'Confirm and hide', exact: true }),
-      l => l.click()
-    );
-    const sample = syntheticSeries();
-    sample.files[0].name = 'GF首个成功.dcm';
-    const registered = page.waitForResponse(
-      r => r.request().method() === 'POST' && /\/tasks$/.test(new URL(r.url()).pathname)
-    );
-    const files = [
-      ...sample.files,
-      {
-        name: 'GF坏.dcm',
-        mimeType: 'application/dicom',
-        buffer: Buffer.from('invalid-synthetic-dicom'),
-      },
-    ];
-    await page.getByLabel('导入文件', { exact: true }).setInputFiles(files);
-    const response = await registered;
-    expect(response.status()).toBe(201);
-    const task: BusinessTask = (await response.json()).data;
-    expect(task).toEqual(
-      expect.objectContaining({
-        task_id: expect.any(String),
-        team_id: owner.default_team_id,
-        assignee_uid: owner.user.uid,
-        title: 'GF首个成功.dcm',
-        metadata: {},
-      })
-    );
-    expect(task.task_id).toBeTruthy();
-    expect(response.request().postDataJSON()).toEqual({ title: 'GF首个成功.dcm' });
-    await expect(page).toHaveURL(new RegExp(`StudyInstanceUIDs=${sample.study}`));
-    await expect(page.locator('.cornerstone-viewport-element').first()).toBeVisible();
     const auditUpdates = async (minimum: number) => {
       await expect
         .poll(async () => {
@@ -272,6 +276,7 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
       expect(actual.segments.every(value => value === visible)).toBe(true);
       count = await auditUpdates(count);
     }
+    await workspaceReady(page);
     const before = {
       requests: touches.length,
       responses: written.length,
@@ -321,26 +326,30 @@ test('GF：两个独立Chromium进程完成真实邀请→导入→事件更新�
       request.patch(path, { headers: { Authorization: `Bearer ${token}` }, data: {} });
     expect((await patch(recipientSession.token)).status()).toBe(403);
     expect((await patch(outsider.token)).status()).toBe(404);
-    // 同一账号在第二浏览器重新真实登录，新Token可访问同实例Task；不复制任何浏览器存储。
-    const sameOwner = await otherBrowser.newContext({ baseURL });
-    const sameOwnerPage = await sameOwner.newPage();
-    await sameOwnerPage.goto('/account/login');
-    expect(await sameOwnerPage.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
-    await credentials(sameOwnerPage, ownerName);
-    await sameOwnerPage.getByRole('button', { name: '登录', exact: true }).click();
-    await expect(sameOwnerPage).toHaveURL(/\/team\/tasks$/);
-    const secondOwner = await identity(sameOwnerPage);
-    expect(secondOwner.user.uid).toBe(owner.user.uid);
-    expect(secondOwner.default_team_id).toBe(owner.default_team_id);
-    expect(secondOwner.token === owner.token).toBe(false);
-    const shared = await sameOwnerPage.request.patch(path, {
-      headers: { Authorization: `Bearer ${secondOwner.token}` },
-      data: {},
+    await test.step('独立浏览器重新登录并复验同实例任务权限', async () => {
+      // 同一账号在第二浏览器重新真实登录，新Token可访问同实例Task；不复制任何浏览器存储。
+      const sameOwner = await otherBrowser.newContext({ baseURL });
+      const sameOwnerPage = await sameOwner.newPage();
+      await sameOwnerPage.goto('/account/login');
+      expect(
+        await sameOwnerPage.evaluate(key => sessionStorage.getItem(key), storageKey)
+      ).toBeNull();
+      await credentials(sameOwnerPage, ownerName);
+      await sameOwnerPage.getByRole('button', { name: '登录', exact: true }).click();
+      await expect(sameOwnerPage).toHaveURL(/\/team\/tasks$/);
+      const secondOwner = await identity(sameOwnerPage);
+      expect(secondOwner.user.uid).toBe(owner.user.uid);
+      expect(secondOwner.default_team_id).toBe(owner.default_team_id);
+      expect(secondOwner.token === owner.token).toBe(false);
+      const shared = await sameOwnerPage.request.patch(path, {
+        headers: { Authorization: `Bearer ${secondOwner.token}` },
+        data: {},
+      });
+      expect(shared.status()).toBe(200);
+      const changed = (await shared.json()).data;
+      expect(changed.task_id).toBe(task.task_id);
+      expect(Date.parse(changed.updated_at)).toBeGreaterThan(Date.parse(written.at(-1).updated_at));
     });
-    expect(shared.status()).toBe(200);
-    const changed = (await shared.json()).data;
-    expect(changed.task_id).toBe(task.task_id);
-    expect(Date.parse(changed.updated_at)).toBeGreaterThan(Date.parse(written.at(-1).updated_at));
   } finally {
     await otherBrowser.close();
   }

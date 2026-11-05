@@ -42,9 +42,16 @@ function mount() {
 }
 const enter = (name: string) =>
   fireEvent.change(screen.getByLabelText('输入他的用户名'), { target: { value: name } });
-const complete = () => fireEvent.click(screen.getByRole('button', { name: '完成', exact: true }));
+const complete = () => fireEvent.click(screen.getByRole('button', { name: '邀请', exact: true }));
 beforeEach(() => {
-  send = jest.fn().mockResolvedValue({ invitation_id: 'i', decision: 'pending' });
+  send = jest.fn().mockResolvedValue({
+    invitation_id: 'i',
+    team_id: 'current',
+    invitee_uid: 'b',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 300000).toISOString(),
+    decision: 'pending',
+  });
   members = jest.fn().mockResolvedValue([{ uid: 'member', username: 'known' }]);
   const snapshot = {
     status: 'authenticated' as const,
@@ -65,6 +72,7 @@ beforeEach(() => {
     },
     teamInvitations: {
       send,
+      listSent: jest.fn().mockResolvedValue({ data: [], server_time: new Date().toISOString() }),
       listMembers: members,
       listNotifications: jest.fn(),
       decide: jest.fn(),
@@ -79,47 +87,30 @@ test('真实邀请表单替换占位，空值不能发送或离页', async () =>
   expect(screen.getByRole('heading', { name: '是否还有其他人加入你？' })).toBeTruthy();
   complete();
   expect(send).not.toHaveBeenCalled();
-  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(
+    (screen.getByRole('button', { name: '邀请', exact: true }) as HTMLButtonElement).disabled
+  ).toBe(true);
   expect(validate).not.toHaveBeenCalled();
+  await act(async () => {});
 });
 
-test.each(['owner', 'known'])('自己或已知成员 %s 不发送', async username => {
+test.each(['owner', 'known'])('自己或已知成员 %s 必须到POST校验', async username => {
+  send.mockRejectedValue(new Error('后端拒绝'));
   mount();
-  await waitFor(() => expect(members).toHaveBeenCalledWith('current', expect.any(AbortSignal)));
   enter(username);
   complete();
-  expect(await screen.findByRole('alert')).toBeTruthy();
-  expect(send).not.toHaveBeenCalled();
+  await screen.findByText('后端拒绝');
+  expect(send).toHaveBeenCalledWith('current', username, expect.any(AbortSignal));
+  expect(members).not.toHaveBeenCalled();
 });
-
-test('成员清单失败必须显错且阻止发送，不伪装已排除成员', async () => {
+test('名单失败、未加载都不影响发送', async () => {
   members.mockRejectedValue(new Error('名单无法加载'));
   mount();
-  await screen.findByRole('alert');
   enter('Bob');
-  complete();
-  expect(send).not.toHaveBeenCalled();
-  expect(screen.queryByText('团队目标')).toBeNull();
-});
-
-test('列表未加载完成前不能发出，加载后可以', async () => {
-  let done: (value: []) => void;
-  members.mockImplementation(
-    () =>
-      new Promise(resolve => {
-        done = resolve;
-      })
-  );
-  mount();
-  enter('Bob');
-  complete();
-  expect(send).not.toHaveBeenCalled();
-  await act(async () => {
-    done!([]);
-  });
   complete();
   await screen.findByText('团队目标');
   expect(send).toHaveBeenCalledTimes(1);
+  expect(members).not.toHaveBeenCalled();
 });
 
 test('仅使用会话当前团队，发送成功才经守卫进入导入，pending 拒绝双击和跳过', async () => {
@@ -131,16 +122,22 @@ test('仅使用会话当前团队，发送成功才经守卫进入导入，pendi
       })
   );
   mount();
-  await waitFor(() => expect(members).toHaveBeenCalled());
+  await screen.findByLabelText('输入他的用户名');
   enter(' Bob ');
-  const submit = screen.getByRole('button', { name: '完成' });
+  const submit = screen.getByRole('button', { name: '邀请' });
   fireEvent.click(submit);
   fireEvent.click(submit);
   fireEvent.click(screen.getByRole('button', { name: '跳过' }));
   expect(send).toHaveBeenCalledTimes(1);
   expect(send).toHaveBeenCalledWith('current', 'Bob', expect.any(AbortSignal));
   expect(validate).not.toHaveBeenCalled();
-  done!({ invitation_id: 'i' });
+  done!({
+    invitation_id: 'i',
+    team_id: 'current',
+    invitee_uid: 'b',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 300000).toISOString(),
+  });
   await screen.findByText('团队目标');
   expect(validate).toHaveBeenCalledTimes(1);
 });
@@ -148,7 +145,7 @@ test('仅使用会话当前团队，发送成功才经守卫进入导入，pendi
 test('真实发送失败留页并可重试，无成功或已入队假文案', async () => {
   send.mockRejectedValueOnce(new Error('发送失败'));
   mount();
-  await waitFor(() => expect(members).toHaveBeenCalled());
+  await screen.findByLabelText('输入他的用户名');
   enter('Bob');
   complete();
   expect(await screen.findByRole('alert')).toBeTruthy();
@@ -173,11 +170,11 @@ test('缺失真实服务时 fail-closed，不替换为 mock', async () => {
   mount();
   enter('Bob');
   complete();
-  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(await screen.findByText('真实邀请服务不可用。')).toBeTruthy();
   expect(send).not.toHaveBeenCalled();
 });
 
-test('发送期间会话当前团队变化，取消旧请求、重新核对成员且不永久 pending', async () => {
+test('发送期间会话当前团队变化，取消旧请求、恢复本人期限且不永久 pending', async () => {
   let done: (value: object) => void;
   send.mockImplementation(
     () =>
@@ -201,10 +198,15 @@ test('发送期间会话当前团队变化，取消旧请求、重新核对成�
   };
   mockServices.session.getSnapshot = () => next;
   view.rerender(tree());
-  await waitFor(() => expect(members).toHaveBeenCalledWith('other', expect.any(AbortSignal)));
+  await waitFor(() =>
+    expect(mockServices.teamInvitations!.listSent).toHaveBeenCalledWith(
+      'other',
+      expect.any(AbortSignal)
+    )
+  );
   expect(oldSignal.aborted).toBe(true);
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: '完成', exact: true })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '邀请', exact: true })).toBeTruthy()
   );
   await act(async () => {
     done!({ invitation_id: 'old' });
@@ -227,7 +229,13 @@ test('离开邀请页后旧发送响应不再导航或更新视图', async () =>
   view.unmount();
   expect((send.mock.calls[0][2] as AbortSignal).aborted).toBe(true);
   await act(async () => {
-    done!({ invitation_id: 'i' });
+    done!({
+      invitation_id: 'i',
+      team_id: 'current',
+      invitee_uid: 'b',
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 300000).toISOString(),
+    });
   });
   expect(validate).not.toHaveBeenCalled();
 });

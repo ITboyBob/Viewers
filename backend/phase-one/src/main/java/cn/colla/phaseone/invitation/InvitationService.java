@@ -24,14 +24,14 @@ public class InvitationService {
     }
     public InvitationView send(String actor, String teamId, SendInvitation input) {
         return transaction.execute(status -> {
-            teams.requireOwner(actor, teamId);
+            teams.requireMember(actor, teamId);
             invitations.lockTeam(teamId);
-            teams.requireOwner(actor, teamId);
+            teams.requireMember(actor, teamId);
             var recipient = identities.byUsername(input.username()).filter(user -> user.status().equals("active") && !actor.equals(user.uid()))
                 .orElseThrow(() -> new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "无法邀请该用户", "INVALID_INVITEE"));
             if (invitations.isMember(teamId, recipient.uid())) throw conflict("ALREADY_MEMBER");
             var now = clock.instant();
-            if (invitations.coolingDown(teamId, recipient.uid(), now)) throw conflict("INVITATION_COOLDOWN");
+            if (invitations.coolingDown(teamId, actor, recipient.uid(), now)) throw conflict("INVITATION_COOLDOWN");
             var id = UUID.randomUUID().toString();
             invitations.insert(id, teamId, actor, recipient.uid(), now);
             return invitations.view(id);
@@ -44,16 +44,27 @@ public class InvitationService {
             invitations.lockTeam(teamId);
             var row = invitations.lockInvitation(id, actor);
             var now = clock.instant();
-            if (!now.isBefore(row.expiresAt())) throw conflict("INVITATION_EXPIRED");
+            if (row.invalidatedAt() != null || !now.isBefore(row.expiresAt())) throw conflict("INVITATION_EXPIRED");
             String decision = accept ? "accepted" : "rejected";
             if (!row.decision().equals("pending")) {
                 if (!row.decision().equals(decision)) throw conflict("DECISION_CONFLICT");
                 return invitations.view(id);
             }
             if (invitations.isMember(teamId, actor)) throw conflict("ALREADY_MEMBER");
-            if (accept) invitations.addAnnotator(teamId, actor, now);
+            if (accept) {
+                invitations.addAnnotator(teamId, actor, now);
+                invitations.invalidateOthers(teamId, actor, id, now);
+            }
             invitations.decide(id, decision, now);
             return invitations.view(id);
+        });
+    }
+    public SentPage sent(String actor, String teamId, PageQuery page) {
+        return transaction.execute(status -> {
+            teams.requireMember(actor, teamId);
+            invitations.lockTeam(teamId);
+            teams.requireMember(actor, teamId);
+            return invitations.sent(teamId, actor, page, clock.instant());
         });
     }
     private static ApiException conflict(String reason) { return new ApiException(HttpStatus.CONFLICT, "CONFLICT", "邀请操作发生冲突", reason); }

@@ -43,11 +43,14 @@ export default {
       const displaySets = displaySetInstanceUIDs.map(uid => {
         const displaySet = displaySetService.getDisplaySetByUID(uid);
         const referencedDisplaySetUID = displaySet?.measurements?.[0]?.displaySetInstanceUID;
-        if (displaySet.Modality === 'SR' && referencedDisplaySetUID) {
+        if (displaySet?.Modality === 'SR' && referencedDisplaySetUID) {
           return displaySetService.getDisplaySetByUID(referencedDisplaySetUID);
         }
         return displaySet;
       });
+
+      // 后端重开会先恢复视口引用，再注册显示集；此时不能崩溃或用半套数据生成布局。
+      if (displaySets.some(displaySet => !displaySet)) return [];
 
       return hangingProtocols
         .map(hp => {

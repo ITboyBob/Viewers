@@ -32,6 +32,15 @@ public class InvitationController {
         request.setAttribute("colla.team", result.team_id());
         return new Data<>(result);
     }
+    @GetMapping("/teams/{teamId}/invitations/sent")
+    public SentPage sent(@AuthenticationPrincipal SessionPrincipal principal, @PathVariable String teamId,
+                         @RequestParam org.springframework.util.MultiValueMap<String, String> query,
+                         @RequestBody(required = false) com.fasterxml.jackson.databind.JsonNode body, HttpServletRequest request) {
+        if (body != null) throw ApiException.validation();
+        var result = invitations.sent(principal.uid(), teamId, PageQuery.parse(query));
+        request.setAttribute("colla.team", teamId);
+        return result;
+    }
     @PostMapping("/teams/{teamId}/invitations") @ResponseStatus(HttpStatus.CREATED)
     public Data<InvitationView> send(@AuthenticationPrincipal SessionPrincipal principal, @PathVariable String teamId,
                                     @Valid @RequestBody SendInvitation input, HttpServletRequest request) {

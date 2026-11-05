@@ -23,7 +23,7 @@ export default function BusinessDialog({
   trigger: React.ReactElement;
   open: boolean;
   onOpenChange(open: boolean): void;
-  variant: 'invite' | 'notifications';
+  variant: 'invite' | 'notifications' | 'members';
 }>) {
   return (
     <Dialog.Root
@@ -42,6 +42,13 @@ export default function BusinessDialog({
         <Dialog.Content
           className={`business-dialog business-dialog--${variant}`}
           aria-describedby={undefined}
+          onCloseAutoFocus={() => {
+            // 切队销毁触发器时，默认焦点恢复无目标；落到新页面主区。
+            setTimeout(() => {
+              if (document.activeElement === document.body)
+                document.querySelector<HTMLElement>('.team-page-main')?.focus();
+            }, 0);
+          }}
           onClick={event => event.stopPropagation()}
           onPointerDown={event => event.stopPropagation()}
           onDragEnter={isolateFileDrag}
@@ -52,7 +59,13 @@ export default function BusinessDialog({
             <Dialog.Title className="business-dialog-title">{title}</Dialog.Title>
             <Dialog.Close
               className="business-top-action business-dialog-close"
-              aria-label={variant === 'invite' ? '关闭邀请弹窗' : '关闭通知弹窗'}
+              aria-label={
+                variant === 'invite'
+                  ? '关闭邀请弹窗'
+                  : variant === 'members'
+                    ? '关闭成员弹窗'
+                    : '关闭通知弹窗'
+              }
             >
               <Close aria-hidden="true" />
             </Dialog.Close>

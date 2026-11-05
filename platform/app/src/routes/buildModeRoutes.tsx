@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useState } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAppConfig } from '@state';
 import { DicomMetadataStore } from '@ohif/core';
@@ -33,6 +33,23 @@ function BusinessModeRoute(props: ModeRouteProps) {
   const project = runtime?.getCurrent?.();
   const storage = props.servicesManager.services.businessServices?.taskStorage;
   const target = new URLSearchParams(location.search).get('task_id');
+  const openedTarget = useRef<string | null>(null);
+  if (target && project?.task_id === target) openedTarget.current = target;
+  const shownTarget = !!target && openedTarget.current === target;
+  const blocked =
+    phaseOneMask &&
+    shownTarget &&
+    (!project || project.phase === 'invalid' || project.phase === 'disposed');
+  useEffect(() => {
+    if (!blocked) return;
+    const stop = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const events = ['keydown', 'keypress', 'keyup'] as const;
+    events.forEach(name => window.addEventListener(name, stop, true));
+    return () => events.forEach(name => window.removeEventListener(name, stop, true));
+  }, [blocked]);
   const validTarget =
     !target || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target);
   const [restoreError, setRestoreError] = useState('');
@@ -41,6 +58,7 @@ function BusinessModeRoute(props: ModeRouteProps) {
     if (
       !phaseOneMask ||
       !target ||
+      shownTarget ||
       !validTarget ||
       !storage ||
       !runtime ||
@@ -75,7 +93,7 @@ function BusinessModeRoute(props: ModeRouteProps) {
       if (!transferred) scope?.release();
     };
   }, [phaseOneMask, target, validTarget, storage, runtime, projects, attempt]);
-  if (phaseOneMask && target && (!validTarget || project?.task_id !== target))
+  if (phaseOneMask && target && (!validTarget || (!shownTarget && project?.task_id !== target)))
     return (
       <div
         role={restoreError || !validTarget ? 'alert' : 'status'}
@@ -100,13 +118,20 @@ function BusinessModeRoute(props: ModeRouteProps) {
             role="status"
             className="bg-black px-3 text-white"
           >
-            当前项目已失效，请重新导入；本页不会恢复先前项目。
+            {shownTarget
+              ? '当前项目已失效，请返回列表重新确认读取资格。'
+              : '当前项目已失效，请重新导入；本页不会恢复先前项目。'}
           </div>
         )}
-      <ModeRoute
-        {...props}
-        phaseOneMask={phaseOneMask}
-      />
+      <div
+        className="h-full w-full"
+        {...(blocked ? { inert: '' } : {})}
+      >
+        <ModeRoute
+          {...props}
+          phaseOneMask={phaseOneMask}
+        />
+      </div>
     </>
   );
 }

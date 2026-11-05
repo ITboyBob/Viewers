@@ -1,3 +1,4 @@
+import { isImportComplete, workspaceReady } from './businessImport';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -37,13 +38,11 @@ async function create(page: Page, files: ReturnType<typeof syntheticSeries>['fil
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: '创建新任务', exact: true }).click();
   const registered = page.waitForResponse(
-    response =>
-      response.request().method() === 'POST' &&
-      /\/teams\/[^/]+\/tasks$/.test(new URL(response.url()).pathname)
+    response => response.request().method() === 'POST' && isImportComplete(response.url())
   );
   await (await chooser).setFiles(files);
   const response = await registered;
-  expect(response.status()).toBe(201);
+  expect(response.status()).toBe(200);
   const task = (await response.json()).data as BusinessTask;
   await expect(page).toHaveURL(/\/segmentation\/dicomlocal\?/);
   await expect
@@ -56,6 +55,7 @@ async function create(page: Page, files: ReturnType<typeof syntheticSeries>['fil
       })
     )
     .toBe(true);
+  await workspaceReady(page);
   return task;
 }
 async function draw(page: Page, nonempty: boolean) {
@@ -129,6 +129,7 @@ async function state(page: Page) {
   });
 }
 async function back(page: Page, path: string) {
+  await workspaceReady(page);
   await page.getByRole('button', { name: '返回工作列表', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(path + '$'));
   await expect(page.getByLabel('任务数量')).toBeVisible();
@@ -151,11 +152,14 @@ for (const view of ['team', 'recent'])
     );
     expect(accepted.status()).toBe(200);
     await login(page, user);
-    await page.evaluate(team => {
-      const key = 'colla.phaseOne.session',
-        saved = JSON.parse(sessionStorage.getItem(key)!);
-      sessionStorage.setItem(key, JSON.stringify({ ...saved, current_team_id: team }));
-    }, owner.default_team_id);
+    expect(
+      (
+        await request.put('/api/v1/auth/sessions/current/team', {
+          headers: { Authorization: `Bearer ${user.token}` },
+          data: { team_id: owner.default_team_id },
+        })
+      ).status()
+    ).toBe(200);
     await page.reload();
     if (view === 'recent')
       await page.getByRole('button', { name: '最近任务', exact: true }).click();
@@ -165,7 +169,7 @@ for (const view of ['team', 'recent'])
       touches = 0;
     page.on('request', req => {
       const path = new URL(req.url()).pathname;
-      if (req.method() === 'POST' && /\/teams\/[^/]+\/tasks$/.test(path)) registrations++;
+      if (req.method() === 'POST' && isImportComplete(req.url())) registrations++;
       if (req.method() === 'PATCH' && path.endsWith('/updated-at')) touches++;
     });
     const sample = syntheticSeries(3);
@@ -212,11 +216,14 @@ for (const view of ['team', 'recent'])
     await page.getByLabel('阈值上限', { exact: true }).fill('150');
     await page.getByRole('button', { name: '应用阈值到整组切片', exact: true }).click();
     await expect.poll(() => touches).toBeGreaterThan(beforeEdit);
+    await workspaceReady(page);
+    const confirmed = await state(page);
     await back(page, returnPath);
     await page.reload();
     await page.locator(`[data-task-id="${b.task_id}"]`).click();
-    await expect(page.getByRole('alert')).toContainText('需重新导入');
-    await expect(page).toHaveURL(/\/team\/recent$/);
+    await expect(page).toHaveURL(/\/segmentation\/dicomlocal/);
+    await workspaceReady(page);
+    await expect.poll(() => state(page)).toEqual(confirmed);
     expect(registrations).toBe(2);
   });
 

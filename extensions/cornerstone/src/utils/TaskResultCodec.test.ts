@@ -55,3 +55,12 @@ test('统计缓存键不固化页面imageId或volumeId', async () => {
   expect(value.cachedStats['stack:dicomfile:99']).toEqual({ length: 12 });
   expect(value.cachedStats['stored-volume-stats']).toEqual({ length: 12 });
 });
+
+test('只读解码保留稳定引用，不需要建立原生项目或改写全局状态', async () => {
+  const { decodeResultState } = await import('./TaskResultCodec');
+  const blob = encodeResult(project, 'SR', { referenceId: 'dicomfile:0', annotations: [] });
+  expect(await decodeResultState('task', { type: 'SR', blob })).toEqual({
+    referenceId: 'urn:colla:image:1/2/3',
+    annotations: [],
+  });
+});

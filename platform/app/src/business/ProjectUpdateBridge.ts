@@ -14,6 +14,7 @@ type Options = {
   measurementService: ProjectEventService;
   segmentationService: ProjectEventService;
   isActive(): boolean;
+  isRestoring?(): boolean;
   notify(message: string): void;
 };
 type Kind = 'measurement' | 'segmentation';
@@ -81,7 +82,11 @@ export class ProjectUpdateBridge {
         for (const event of new Set(Object.values(service.EVENTS))) {
           this.subscriptions.push(
             service.subscribe(event, payload => {
-              if (!this.eligible() || !this.belongs(kind, payload)) {
+              if (
+                !this.eligible() ||
+                this.options.isRestoring?.() ||
+                !this.belongs(kind, payload)
+              ) {
                 return;
               }
               this.queue.push(() => this.belongs(kind, payload));

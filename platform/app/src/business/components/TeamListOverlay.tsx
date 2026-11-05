@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { CheckIcon, ChevronRightIcon, HomeIcon } from '@radix-ui/react-icons';
 import type { BusinessTeamMembership } from '@ohif/core';
@@ -10,14 +10,23 @@ export default function TeamListOverlay({
   teams,
   currentTeamId,
   onSelect,
+  trigger,
 }: {
   ownedTeam?: BusinessTeamMembership;
   teams?: BusinessTeamMembership[];
   currentTeamId?: string | null;
   onSelect?(id: string): Promise<void>;
-  contentRef: React.RefObject<HTMLDivElement>;
-  suppressCloseFocusRef: React.RefObject<boolean>;
+  contentRef?: React.RefObject<HTMLDivElement>;
+  suppressCloseFocusRef?: React.RefObject<boolean>;
+  trigger?: React.ReactElement;
 }) {
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const [open, setOpen] = useState(false);
   const [compact, setCompact] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -41,25 +50,27 @@ export default function TeamListOverlay({
       onOpenChange={setOpen}
     >
       <Popover.Trigger asChild>
-        <button
-          type="button"
-          role="menuitem"
-          aria-haspopup="menu"
-          className="business-member-team-trigger"
-          onKeyDown={event => {
-            if (event.key === 'ArrowRight') {
-              event.preventDefault();
-              setOpen(true);
-            }
-          }}
-        >
-          <HomeIcon aria-hidden="true" />
-          查看我的团队
-          <ChevronRightIcon
-            className="business-team-chevron"
-            aria-hidden="true"
-          />
-        </button>
+        {trigger ?? (
+          <button
+            type="button"
+            role="menuitem"
+            aria-haspopup="menu"
+            className="business-member-team-trigger"
+            onKeyDown={event => {
+              if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                setOpen(true);
+              }
+            }}
+          >
+            <HomeIcon aria-hidden="true" />
+            查看我的团队
+            <ChevronRightIcon
+              className="business-team-chevron"
+              aria-hidden="true"
+            />
+          </button>
+        )}
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
@@ -83,7 +94,7 @@ export default function TeamListOverlay({
           onKeyPress={event => event.stopPropagation()}
           onKeyUp={event => event.stopPropagation()}
           onCloseAutoFocus={event => {
-            if (suppressCloseFocusRef.current) {
+            if (suppressCloseFocusRef?.current) {
               event.preventDefault();
             }
           }}
@@ -108,11 +119,12 @@ export default function TeamListOverlay({
                 setError('');
                 try {
                   await onSelect(team.team_id);
-                  setOpen(false);
+                  if (alive.current) setOpen(false);
                 } catch (failure) {
-                  setError(failure instanceof Error ? failure.message : '切换团队失败');
+                  if (alive.current)
+                    setError(failure instanceof Error ? failure.message : '切换团队失败');
                 } finally {
-                  setBusy(false);
+                  if (alive.current) setBusy(false);
                 }
               }}
             >

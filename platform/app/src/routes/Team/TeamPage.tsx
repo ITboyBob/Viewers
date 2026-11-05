@@ -20,11 +20,14 @@ export type TeamPageProps = {
   onRefresh?(): void;
   createTaskSlot?: React.ReactNode;
   memberSlot?: React.ReactNode;
+  teamSelectorSlot?: React.ReactNode;
+  teamActionsSlot?: React.ReactNode;
   notificationSlot?: React.ReactNode;
   taskStatusSlot?: React.ReactNode;
   onOpenTask?(taskId: string): void;
   canOpenTask?(taskId: string): boolean;
-  renderPreview?(taskId: string): React.ReactNode;
+  renderPreview?(taskId: string, generation: number): React.ReactNode;
+  previewGeneration?: number;
   openingTaskId?: string | null;
 };
 
@@ -37,12 +40,15 @@ export default function TeamPage({
   onViewChange,
   onRefresh,
   memberSlot,
+  teamSelectorSlot,
+  teamActionsSlot,
   createTaskSlot,
   notificationSlot,
   taskStatusSlot,
   onOpenTask,
   canOpenTask,
   renderPreview,
+  previewGeneration = 0,
   openingTaskId,
 }: TeamPageProps) {
   const heading = view === 'team' ? '团队任务' : '最近任务';
@@ -81,13 +87,17 @@ export default function TeamPage({
           <div className="team-page-notifications">{notificationSlot}</div>
           {view === 'team' && team && (
             <div className="team-page-team-label">
-              <span
-                className="team-page-initial team-page-initial-small"
-                aria-hidden="true"
-              >
-                {initial}
-              </span>
-              <span>{team.name}</span>
+              {teamSelectorSlot ?? (
+                <>
+                  <span
+                    className="team-page-initial team-page-initial-small"
+                    aria-hidden="true"
+                  >
+                    {initial}
+                  </span>
+                  <span>{team.name}</span>
+                </>
+              )}
             </div>
           )}
           <nav
@@ -121,7 +131,10 @@ export default function TeamPage({
             </button>
           </nav>
         </aside>
-        <main className="team-page-main">
+        <main
+          className="team-page-main"
+          tabIndex={-1}
+        >
           {view === 'team' && team && (
             <div className="team-page-team-heading">
               <span
@@ -132,7 +145,7 @@ export default function TeamPage({
               </span>
               <div className="team-page-team-description">
                 <h1>{team.name}</h1>
-                <p>影像协作，从这里开始</p>
+                {teamActionsSlot}
               </div>
             </div>
           )}
@@ -186,7 +199,15 @@ export default function TeamPage({
                     <article
                       className="team-page-card"
                       key={task.task_id}
+                      data-task-card={task.task_id}
                     >
+                      <div className="team-page-preview">
+                        {renderPreview ? (
+                          renderPreview(task.task_id, previewGeneration)
+                        ) : (
+                          <span>本地影像任务</span>
+                        )}
+                      </div>
                       <button
                         type="button"
                         className="team-page-card-open"
@@ -195,9 +216,6 @@ export default function TeamPage({
                         disabled={!onOpenTask || !!openingTaskId}
                         onClick={() => onOpenTask?.(task.task_id)}
                       >
-                        <div className="team-page-preview">
-                          {renderPreview ? renderPreview(task.task_id) : <span>本地影像任务</span>}
-                        </div>
                         <div className="team-page-card-info">
                           <h3>{task.title}</h3>
                           <p>创建于 {new Date(task.created_at).toLocaleString()}</p>

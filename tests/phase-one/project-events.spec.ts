@@ -1,3 +1,4 @@
+import { isImportComplete, workspaceReady } from './businessImport';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -19,10 +20,15 @@ export type ProjectTestWindow = Window & {
     businessServices: BusinessServices;
     measurementService: Omit<ProjectEventService, 'getMeasurements'> & {
       getMeasurements(): Array<{ uid: string }>;
+      clearMeasurements(): void;
+      setMeasurementSelected(uid: string, selected: boolean): void;
       jumpToMeasurement(viewportId: string, uid: string): void;
     };
     segmentationService: Omit<ProjectEventService, 'getSegmentations'> & {
-      getSegmentations(): Array<{ segmentationId: string }>;
+      getSegmentations(): Array<{
+        segmentationId: string;
+        segments: Record<number, { cachedStats?: { namedStats?: Record<string, unknown> } }>;
+      }>;
       getSegmentationRepresentations(
         viewportId: string,
         value: { segmentationId: string; type: string }
@@ -72,14 +78,14 @@ async function enter(page: Page, request: APIRequestContext): Promise<BusinessTa
     locator => locator.click()
   );
   const registered = page.waitForResponse(
-    response =>
-      response.request().method() === 'POST' && /\/tasks$/.test(new URL(response.url()).pathname)
+    response => response.request().method() === 'POST' && isImportComplete(response.url())
   );
   await page.getByLabel('导入文件', { exact: true }).setInputFiles(syntheticSeries().files);
   const response = await registered;
-  expect(response.status()).toBe(201);
+  expect(response.status()).toBe(200);
   const task: BusinessTask = (await response.json()).data;
   await expect(page.locator('.cornerstone-viewport-element').first()).toBeVisible();
+  await workspaceReady(page);
   return task;
 }
 async function measure(page: Page) {
@@ -182,6 +188,16 @@ test('真实测量／分割与展示动作逐事件写时间，退出无销毁�
   request,
 }) => {
   const task = await enter(page, request);
+  const token = await page.evaluate(
+    () => JSON.parse(sessionStorage.getItem('colla.phaseOne.session')!).token
+  );
+  const readResults = async () => {
+    const response = await request.get(`/api/v1/tasks/${task.task_id}/results`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.status()).toBe(200);
+    return (await response.json()).data;
+  };
   const written: Array<{ task_id: string; updated_at: string }> = [];
   const touchRequests: string[] = [];
   const pending = new Set<Promise<void>>();
@@ -224,6 +240,20 @@ test('真实测量／分割与展示动作逐事件写时间，退出无销毁�
     '阈值选区完成'
   );
   await expect.poll(() => written.length).toBeGreaterThan(beforeMask);
+  // 阈值像素完成后，原生统计仍异步计算；先完成这一内容阶段，再核验纯展示不修订。
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const mask = (
+          window as unknown as ProjectTestWindow
+        ).services.segmentationService.getSegmentations()[0];
+        return Boolean(mask?.segments[1]?.cachedStats?.namedStats?.volume);
+      })
+    )
+    .toBe(true);
+  await workspaceReady(page);
+  const confirmedResults = await readResults();
+  expect(confirmedResults.revision).toBeGreaterThan(0);
   const beforeDisplay = written.length;
   await page.evaluate(() => {
     const s = (window as unknown as ProjectTestWindow).services;
@@ -236,6 +266,10 @@ test('真实测量／分割与展示动作逐事件写时间，退出无销毁�
     );
   });
   await expect.poll(() => written.length).toBeGreaterThan(beforeDisplay);
+  await page.evaluate(() => {
+    const service = (window as unknown as ProjectTestWindow).services.measurementService;
+    service.setMeasurementSelected(service.getMeasurements()[0].uid, true);
+  });
   await expect
     .poll(
       async () =>
@@ -254,6 +288,9 @@ test('真实测量／分割与展示动作逐事件写时间，退出无销毁�
         )) === written.at(-1)?.updated_at
     )
     .toBe(true);
+  await workspaceReady(page);
+  const afterResults = await readResults();
+  expect(afterResults).toEqual(confirmedResults);
   expect(failures).toEqual([]);
   const current = await page.evaluate(() => {
     const p = (
@@ -286,12 +323,11 @@ test('真实测量／分割与展示动作逐事件写时间，退出无销毁�
   // 在选择文件前订阅，覆盖beginMode之后的初始化清空／加载广播；网络审计持续保留。
   await startEventAudit(page);
   const second = page.waitForResponse(
-    response =>
-      response.request().method() === 'POST' && /\/tasks$/.test(new URL(response.url()).pathname)
+    response => response.request().method() === 'POST' && isImportComplete(response.url())
   );
   await page.getByLabel('导入文件', { exact: true }).setInputFiles(syntheticSeries().files);
   const secondResponse = await second;
-  expect(secondResponse.status()).toBe(201);
+  expect(secondResponse.status()).toBe(200);
   const next: BusinessTask = (await secondResponse.json()).data;
   expect(next.task_id).toBeTruthy();
   expect(next.task_id).not.toBe(task.task_id);
@@ -492,11 +528,15 @@ test('真实撤销业务会话后touch401清身份和桥接，标注页保留且
     response => touchPath(response.url()) && response.status() === 401
   );
   const before = page.url();
-  await measure(page);
+  // 失效可以中止尚未结束的绘制手势；用真实服务广播触发，不要求失效后还能完成编辑。
+  await page.evaluate(() =>
+    (window as unknown as ProjectTestWindow).services.measurementService.clearMeasurements()
+  );
   await denied;
   await expect(page.getByRole('alert').filter({ hasText: '业务身份已失效' })).toBeVisible();
   expect(page.url()).toBe(before);
   await expect(page.locator('canvas').first()).toBeVisible();
+  await expect(page.locator('[inert]')).toBeVisible();
   expect(
     await page.evaluate(() =>
       (window as unknown as ProjectTestWindow).services.businessServices.projectRuntime.getCurrent()
@@ -505,8 +545,8 @@ test('真实撤销业务会话后touch401清身份和桥接，标注页保留且
 });
 
 for (const status of [403, 404]) {
-  test(`客户端注入${status}后旧project停止桥接，刷新不伪恢复`, async ({ page, request }) => {
-    await enter(page, request);
+  test(`写入${status}停止旧桥接，刷新按后端读取资格恢复或拒绝`, async ({ page, request }) => {
+    const task = await enter(page, request);
     let attempts = 0;
     await page.route('**/tasks/*/updated-at', async route => {
       attempts++;
@@ -517,12 +557,38 @@ for (const status of [403, 404]) {
       });
     });
     const url = page.url();
-    await measure(page);
+    await page.evaluate(() =>
+      (window as unknown as ProjectTestWindow).services.measurementService.clearMeasurements()
+    );
     await expect(page.getByRole('status').filter({ hasText: '当前项目已失效' })).toBeVisible();
     expect(attempts).toBe(1);
     expect(page.url()).toBe(url);
     await page.reload();
-    await expect(page.getByRole('status').filter({ hasText: '请重新导入' })).toBeVisible();
+    await workspaceReady(page);
+    expect(
+      await page.evaluate(
+        () =>
+          (
+            window as unknown as ProjectTestWindow
+          ).services.businessServices.projectRuntime.getCurrent()?.task_id
+      )
+    ).toBe(task.task_id);
+    await page.route('**/api/v1/tasks/*/materials', route =>
+      route.fulfill({
+        status,
+        json: { error: { code: 'DENIED', message: '合成读取资格失效', details: {} } },
+      })
+    );
+    await page.reload();
+    await expect(page.getByRole('alert')).toContainText('合成读取资格失效');
+    expect(
+      await page.evaluate(() =>
+        (
+          window as unknown as ProjectTestWindow
+        ).services.businessServices.projectRuntime.getCurrent()
+      )
+    ).toBeNull();
+    await expect(page.locator('.cornerstone-viewport-element')).toHaveCount(0);
     await frames(page);
     expect(attempts).toBe(1);
   });

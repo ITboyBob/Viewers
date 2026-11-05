@@ -1,3 +1,4 @@
+import normalizeImagePlaneGeometry from '../utils/normalizeImagePlaneGeometry';
 import queryString from 'query-string';
 import dicomParser from 'dicom-parser';
 import { utilities } from '@cornerstonejs/core';
@@ -522,6 +523,10 @@ const WADO_IMAGE_LOADER = {
     // TODO: We should use the rest of the results of this function
     // to update the UI somehow
     const { PixelSpacing, type } = getPixelSpacingInformation(instance) || {};
+    const normalizedPlane = normalizeImagePlaneGeometry(
+      { ImagePositionPatient, ImageOrientationPatient },
+      PixelSpacing
+    );
 
     let rowPixelSpacing;
     let columnPixelSpacing;
@@ -534,7 +539,7 @@ const WADO_IMAGE_LOADER = {
     let isDefaultValueSetForColumnCosine = false;
     let imageOrientationPatient;
     if (PixelSpacing) {
-      [rowPixelSpacing, columnPixelSpacing] = PixelSpacing;
+      [rowPixelSpacing, columnPixelSpacing] = normalizedPlane.pixelSpacing;
       const calibratedPixelSpacing = utilities.calibratedPixelSpacingMetadataProvider.get(
         'calibratedPixelSpacing',
         instance.imageId
@@ -547,24 +552,24 @@ const WADO_IMAGE_LOADER = {
         });
       }
     } else {
-      rowPixelSpacing = columnPixelSpacing = 1;
+      [rowPixelSpacing, columnPixelSpacing] = normalizedPlane.pixelSpacing;
       usingDefaultValues = true;
     }
 
     if (ImageOrientationPatient) {
-      rowCosines = toNumber(ImageOrientationPatient.slice(0, 3));
-      columnCosines = toNumber(ImageOrientationPatient.slice(3, 6));
-      imageOrientationPatient = toNumber(ImageOrientationPatient);
+      rowCosines = normalizedPlane.rowCosines;
+      columnCosines = normalizedPlane.columnCosines;
+      imageOrientationPatient = normalizedPlane.orientation;
     } else {
-      rowCosines = [1, 0, 0];
-      columnCosines = [0, 1, 0];
-      imageOrientationPatient = [1, 0, 0, 0, 1, 0];
+      rowCosines = normalizedPlane.rowCosines;
+      columnCosines = normalizedPlane.columnCosines;
+      imageOrientationPatient = normalizedPlane.orientation;
       usingDefaultValues = true;
       isDefaultValueSetForRowCosine = true;
       isDefaultValueSetForColumnCosine = true;
     }
 
-    const imagePositionPatient = toNumber(ImagePositionPatient) || [0, 0, 0];
+    const imagePositionPatient = normalizedPlane.position;
     if (!ImagePositionPatient) {
       usingDefaultValues = true;
     }

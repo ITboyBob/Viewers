@@ -27,7 +27,7 @@ export type BusinessRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   binaryBody?: Blob;
-  responseType?: 'blob';
+  responseType?: 'blob' | 'page';
   timeoutMs?: number;
   signal?: AbortSignal;
   idempotencyKey?: string;
@@ -73,7 +73,16 @@ export type MemberView = BusinessUserSummary & {
   role: 'owner' | 'annotator';
   joined_at: string;
 };
+export type SentInvitationDeadline = {
+  invitation_id: string;
+  team_id: string;
+  invitee: { uid: string; username: string };
+  created_at: string;
+  expires_at: string;
+};
+export type SentInvitationDeadlines = { data: SentInvitationDeadline[]; server_time: string };
 export interface TeamInvitationApi {
+  listSent?(teamId: string, signal?: AbortSignal): Promise<SentInvitationDeadlines>;
   send(teamId: string, username: string, signal?: AbortSignal): Promise<InvitationView>;
   listMembers(teamId: string, signal?: AbortSignal): Promise<MemberView[]>;
   listNotifications(signal?: AbortSignal): Promise<InvitationView[]>;
@@ -539,3 +548,29 @@ export interface TaskStorageApi {
     signal: AbortSignal
   ): Promise<TaskResults>;
 }
+
+/** 卡片封面只读组合身份；不授予编辑或缓存读取资格。 */
+export type ReadonlyPreviewInput = {
+  account_uid: string;
+  team_id: string;
+  task_id: string;
+  source_file_id: string;
+  study_uid: string;
+  series_uid: string;
+  sop_uid: string;
+  frame_index: number;
+  revision: number;
+  render_rule_version: number;
+  sourceBlob: Blob;
+  objects: Array<ResultObject & { blob: Blob }>;
+  access: TaskAccess;
+};
+export type ReadonlyPreviewResult = Pick<
+  ReadonlyPreviewInput,
+  'task_id' | 'source_file_id' | 'frame_index' | 'revision' | 'render_rule_version'
+> & {
+  image?: string;
+  release?(): void;
+  status: 'loading' | 'ready' | 'error';
+  error?: string;
+};

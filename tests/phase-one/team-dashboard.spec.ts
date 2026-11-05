@@ -122,11 +122,11 @@ test('原成员在团队空间左边；自有团队勾选，真实空列表和�
   await expect(page.getByRole('button', { name: '回收站（暂未开放）' })).toBeDisabled();
   await member.click();
   await expect(page.getByRole('menuitem', { name: '退出登录', exact: true })).toBeEnabled();
-  await page.getByRole('menuitem', { name: '查看你的团队', exact: true }).click();
+  await page.getByRole('menuitem', { name: '查看我的团队', exact: true }).click();
   const menu = page.getByRole('menu', { name: '团队列表', exact: true });
   const owned = session.memberships.find(item => item.team_id === session.default_team_id)!;
   await expect(menu.getByRole('menuitemradio', { checked: true })).toContainText(owned.name);
-  for (const item of await menu.getByRole('menuitemradio').all()) await expect(item).toBeDisabled();
+  for (const item of await menu.getByRole('menuitemradio').all()) await expect(item).toBeEnabled();
   await expect(menu.getByText(/示例团队/)).toHaveCount(0);
   await expect(menu.getByRole('menuitemradio')).toHaveCount(1);
   await menu.screenshot({ path: testInfo.outputPath('自有团队下拉.png') });
@@ -181,7 +181,7 @@ test('真实入队邀请发送成功后进入团队任务，不把邀请替换�
       response.request().method() === 'POST' &&
       new URL(response.url()).pathname.endsWith('/invitations')
   );
-  await page.getByRole('button', { name: '完成', exact: true }).click();
+  await page.getByRole('button', { name: '邀请', exact: true }).click();
   const response = await sent;
   expect(response.status()).toBe(201);
   expect((await response.json()).data.team_id).toBe(session.default_team_id);

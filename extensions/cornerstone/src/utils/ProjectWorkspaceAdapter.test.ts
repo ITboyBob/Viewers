@@ -21,6 +21,12 @@ jest.mock(
   '@cornerstonejs/tools',
   () => ({
     annotation: {
+      config: {
+        style: {
+          getStyleProperty: (key: string) => (key === 'color' ? 'rgb(255,255,0)' : '1'),
+          setAnnotationStyles: jest.fn(),
+        },
+      },
       state: {
         getAllAnnotations: jest.fn(),
         removeAnnotation: jest.fn(),
@@ -370,4 +376,79 @@ test('只读切换关闭当前活动画笔，不触发未使用画笔的预览�
   adapter.setReadOnly(false);
   expect(group.setToolPassive).toHaveBeenCalledWith('Length');
   expect(group.setToolPassive).not.toHaveBeenCalledWith('UnusedBrush');
+});
+
+test('Contour快照保存确认分割配色而非通用批注颜色', () => {
+  const { adapter, services } = setup();
+  services.segmentationService.getSegmentations = () => [
+    {
+      segmentationId: 'contour',
+      label: '轮廓',
+      segments: { 1: { label: '区域' } },
+      representationData: { Contour: { geometryIds: [] } },
+    },
+  ];
+  services.segmentationService.getRepresentationsForSegmentation = () => [
+    { viewportId: 'vp', representations: [{ segments: { 1: { visible: true } } }] },
+  ];
+  services.segmentationService.getSegmentColor = () => [0, 0, 255, 255];
+  const state = adapter.capture(project) as any;
+  expect(state.segmentations[0].colors).toEqual({ 1: [0, 0, 255, 255] });
+});
+
+test('确认成果包排除选中高亮可见性与活动手柄，不修改活跃工作台数据', async () => {
+  const codec = await import('./TaskResultCodec'),
+    spy = jest.spyOn(codec, 'encodeResult');
+  const f = setup(),
+    item = annotation.state.getAllAnnotations()[0];
+  Object.assign(item, { highlighted: true, isSelected: true, isVisible: false, invalidated: true });
+  item.data.handles.activeHandleIndex = 1;
+  f.services.measurementService.getMeasurements = () => [
+    { uid: 'length', isSelected: true, isVisible: false, label: '测量' },
+  ];
+  try {
+    await f.adapter.exportArtifacts!(project);
+    const state: any = spy.mock.calls.find(call => call[1] === 'SR')![2];
+    expect(state.annotations[0]).not.toHaveProperty('highlighted');
+    expect(state.annotations[0]).not.toHaveProperty('isSelected');
+    expect(state.annotations[0]).not.toHaveProperty('isVisible');
+    expect(state.annotations[0]).not.toHaveProperty('invalidated');
+    expect(state.annotations[0].data.handles).not.toHaveProperty('activeHandleIndex');
+    expect(state.measurements[0]).not.toHaveProperty('isSelected');
+    expect(state.measurements[0]).not.toHaveProperty('isVisible');
+    const masks: any = spy.mock.calls.find(call => call[1] === 'SEG')![2];
+    expect(masks.segmentations[0].segments[1]).not.toHaveProperty('active');
+    expect(item.highlighted).toBe(true);
+    expect(f.mask.segments[1].active).toBe(true);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('后端成果没有活动选择标志时，为原有分割段建立本页默认选择而不修改确认快照', async () => {
+  const f = restorable(),
+    state: any = f.adapter.capture(project);
+  delete state.segmentations[0].segments[1].active;
+  await f.adapter.restore(project, state, new AbortController().signal);
+  const input = f.services.segmentationService.addOrUpdateSegmentation.mock.calls[0][0];
+  expect(input.config.segments[1].active).toBe(true);
+  expect(state.segmentations[0].segments[1]).not.toHaveProperty('active');
+});
+
+test('临时手柄索引未持久化时按原生契约恢复null，而不是undefined触发非法绘制', async () => {
+  const f = restorable(),
+    state: any = f.adapter.capture(project),
+    add = jest.fn();
+  delete state.annotations[0].data.handles.activeHandleIndex;
+  delete state.annotations[0].highlighted;
+  const manager = jest
+    .spyOn(annotation.state, 'getAnnotationManager')
+    .mockReturnValue({ addAnnotation: add } as any);
+  try {
+    await f.adapter.restore(project, state, new AbortController().signal);
+    expect(add.mock.calls[0][0].data.handles.activeHandleIndex).toBeNull();
+    expect(add.mock.calls[0][0].highlighted).toBe(false);
+  } finally {
+    manager.mockRestore();
+  }
 });

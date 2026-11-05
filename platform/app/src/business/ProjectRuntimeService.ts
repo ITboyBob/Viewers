@@ -20,6 +20,8 @@ type Binding = {
   scope: LocalImportScope;
   generation: number;
   stopBridge?: () => void;
+  enableStoredBridge?: () => void;
+  storedBridgeStarted?: boolean;
   autoSave?: TaskAutoSave;
   restoreController: AbortController;
   restored: boolean;
@@ -68,6 +70,8 @@ export class ProjectRuntimeService implements ProjectRuntime {
       this.storage
     ) {
       if (!this.adapter) throw new Error('原生成果适配器未装配');
+      binding.stopBridge?.();
+      binding.storedBridgeStarted = false;
       binding.autoSave?.stop();
       const saver = new TaskAutoSave(
         binding.project,
@@ -78,7 +82,22 @@ export class ProjectRuntimeService implements ProjectRuntime {
       );
       binding.autoSave = saver;
       await saver.restore(binding.restoreController.signal);
+      if (
+        this.binding !== binding ||
+        binding.restoreController.signal.aborted ||
+        !this.projects.isCurrent(binding.project)
+      ) {
+        saver.stop();
+        return;
+      }
       binding.restored = true;
+      // Mode完成原生初始化、保存器建立基线后才开始用户业务事件订阅。
+      binding.enableStoredBridge = () => {
+        if (!binding.storedBridgeStarted) {
+          binding.storedBridgeStarted = true;
+          this.beginMode(services, dataSourceName);
+        }
+      };
       return;
     }
     const state = this.projects.getWorkspaceState?.(binding.project);
@@ -113,6 +132,13 @@ export class ProjectRuntimeService implements ProjectRuntime {
     if (!binding) return;
     await binding.autoSave?.start();
     if (
+      this.binding !== binding ||
+      binding.restoreController.signal.aborted ||
+      !this.projects.isCurrent(binding.project)
+    )
+      return;
+    binding.enableStoredBridge?.();
+    if (
       binding.project.source_stored &&
       !binding.visitRecorded &&
       this.binding === binding &&
@@ -141,6 +167,8 @@ export class ProjectRuntimeService implements ProjectRuntime {
     if (
       !binding ||
       !this.tasks ||
+      !binding.project.importer_uid ||
+      (binding.project.viewer_uid && binding.project.viewer_uid !== binding.project.importer_uid) ||
       dataSourceName !== 'dicomlocal' ||
       binding.project.mode_path !== 'segmentation/dicomlocal' ||
       !this.projects.isCurrent(binding.project) ||
@@ -164,6 +192,7 @@ export class ProjectRuntimeService implements ProjectRuntime {
         binding.active &&
         binding.generation === generation &&
         binding.scope.isActive?.() !== false,
+      isRestoring: () => binding.autoSave?.isRestoring ?? false,
       notify: message =>
         services.uiNotificationService?.show({ title: '项目时间', message, type: 'warning' }),
     });

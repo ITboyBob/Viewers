@@ -18,6 +18,7 @@ spring:
         - optional:classpath:db/V003__tasks.sql
         - optional:classpath:db/V004__task_visits.sql
         - classpath:db/V005__workspace_storage.sql
+        - classpath:db/V006__invitation_validity.sql
   h2:
     console:
       enabled: false

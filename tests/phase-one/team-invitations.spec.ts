@@ -68,7 +68,7 @@ for (const decision of ['accepted', 'rejected'] as const) {
           response.request().method() === 'POST' &&
           new URL(response.url()).pathname.endsWith('/invitations')
       );
-      await page.getByRole('button', { name: '完成', exact: true }).click();
+      await page.getByRole('button', { name: '邀请', exact: true }).click();
       const sendResponse = await sent;
       expect(sendResponse.status()).toBe(201);
       const invitation: InvitationView = (await sendResponse.json()).data;
@@ -124,7 +124,9 @@ for (const decision of ['accepted', 'rejected'] as const) {
   });
 }
 
-test('真实失败留在邀请页，自己不发送；跳过不额外发送且经会话守卫进入团队任务', async ({ page }) => {
+test('真实失败留在邀请页，自己由POST拒绝；跳过不额外发送且经会话守卫进入团队任务', async ({
+  page,
+}) => {
   const name = username();
   let invitations = 0;
   let validations = 0;
@@ -142,14 +144,14 @@ test('真实失败留在邀请页，自己不发送；跳过不额外发送且�
   await page.getByRole('button', { name: '下一步' }).click();
   await expect(page.getByText(/邀请入队：/)).toBeVisible();
   await page.getByLabel('输入他的用户名').fill(name);
-  await page.getByRole('button', { name: '完成', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('不能邀请自己');
-  expect(invitations).toBe(0);
+  await page.getByRole('button', { name: '邀请', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('无法邀请该用户');
+  expect(invitations).toBe(1);
   await page.getByLabel('输入他的用户名').fill(username());
-  await page.getByRole('button', { name: '完成', exact: true }).click();
+  await page.getByRole('button', { name: '邀请', exact: true }).click();
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page).toHaveURL(/\/account\/invite$/);
-  expect(invitations).toBe(1);
+  expect(invitations).toBe(2);
   const before = validations;
   await page.getByRole('button', { name: '跳过' }).click();
   await expect(page).toHaveURL(/\/team\/tasks$/);
@@ -158,5 +160,5 @@ test('真实失败留在邀请页，自己不发送；跳过不额外发送且�
   await expect(page.getByRole('button', { name: '邀请', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '团队任务', exact: true })).toBeVisible();
   expect(validations).toBeGreaterThan(before);
-  expect(invitations).toBe(1);
+  expect(invitations).toBe(2);
 });

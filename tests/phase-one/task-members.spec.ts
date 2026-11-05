@@ -1,3 +1,4 @@
+import { isImportComplete, workspaceReady } from './businessImport';
 import { test, expect, type APIRequestContext, type Page, type Route } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import type { BusinessTask, TaskMemberList } from '../../platform/core/src/types/BusinessContracts';
@@ -24,15 +25,14 @@ async function login(page: Page, request: APIRequestContext) {
 }
 async function importTask(page: Page): Promise<BusinessTask> {
   const registered = page.waitForResponse(
-    response =>
-      response.request().method() === 'POST' &&
-      /\/api\/v1\/teams\/[^/]+\/tasks$/.test(new URL(response.url()).pathname)
+    response => response.request().method() === 'POST' && isImportComplete(response.url())
   );
   await page.getByLabel('导入文件', { exact: true }).setInputFiles(syntheticSeries(3).files);
   const response = await registered;
-  expect(response.status()).toBe(201);
+  expect(response.status()).toBe(200);
   const task: BusinessTask = (await response.json()).data;
   await expect(page.getByRole('button', { name: '任务成员', exact: true })).toBeVisible();
+  await workspaceReady(page);
   return task;
 }
 const panel = (page: Page) => page.getByRole('dialog', { name: '任务成员', exact: true });

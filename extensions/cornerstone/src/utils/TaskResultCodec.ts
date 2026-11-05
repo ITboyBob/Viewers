@@ -109,6 +109,21 @@ export async function decodeResult(
   project: LocalProject,
   artifact: ResultArtifact
 ): Promise<unknown> {
+  return decodeResultState(
+    project.task_id!,
+    artifact,
+    value => stableImageReference(project, value, true),
+    key => referenceKey(project, key, true)
+  );
+}
+
+/** 纯二进制解码：只读消费者保持稳定引用，不建立原生imageId或导入工作台。 */
+export async function decodeResultState(
+  taskId: string,
+  artifact: ResultArtifact,
+  mapValue: (value: string) => string = value => value,
+  mapKey: (key: string) => string = key => key
+): Promise<unknown> {
   const buffer = await artifact.blob.arrayBuffer();
   if (buffer.byteLength < 4) {
     throw new Error('成果包损坏');
@@ -120,7 +135,7 @@ export async function decodeResult(
   let offset = 4 + length;
   const value = JSON.parse(new TextDecoder().decode(buffer.slice(4, offset)), (_key, v) => {
     if (typeof v === 'string') {
-      return stableImageReference(project, v, true);
+      return mapValue(v);
     }
     if (v && typeof v === 'object' && v.$array) {
       const Constructor = arrays[v.$array as keyof typeof arrays];
@@ -144,15 +159,13 @@ export async function decodeResult(
       return new Set(v.$set);
     }
     if (v && typeof v === 'object' && !Array.isArray(v)) {
-      return Object.fromEntries(
-        Object.entries(v).map(([name, item]) => [referenceKey(project, name, true), item])
-      );
+      return Object.fromEntries(Object.entries(v).map(([name, item]) => [mapKey(name), item]));
     }
     return v;
   });
   if (
     value.version !== 1 ||
-    value.task_id !== project.task_id ||
+    value.task_id !== taskId ||
     value.type !== artifact.type ||
     offset !== buffer.byteLength
   ) {

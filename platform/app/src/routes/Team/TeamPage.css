@@ -272,3 +272,25 @@
 .team-page-card-open:disabled {
   cursor: default;
 }
+
+.team-preview-open {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.team-preview-open:focus-visible {
+  outline: 2px solid var(--account-primary);
+  outline-offset: -2px;
+}
+.team-page-preview [role='alert'] {
+  padding: 12px;
+  max-height: 100%;
+  overflow: auto;
+  font-size: 12px;
+}
+.team-page-preview [role='alert'] button {
+  color: var(--account-primary);
+}

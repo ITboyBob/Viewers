@@ -1,13 +1,20 @@
 import React from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { BusinessServices } from '@ohif/core';
-import { imageLoader } from '@cornerstonejs/core';
+import { cache, imageLoader } from '@cornerstonejs/core';
 import filesToImportBatch, { releaseImportBatch } from '../Local/filesToImportBatch';
 import TaskPreview from './TaskPreview';
 
-jest.mock('@cornerstonejs/core', () => ({ imageLoader: { loadAndCacheImage: jest.fn() } }), {
-  virtual: true,
-});
+jest.mock(
+  '@cornerstonejs/core',
+  () => ({
+    imageLoader: { loadAndCacheImage: jest.fn() },
+    cache: { getImageLoadObject: jest.fn(() => ({})), removeImageLoadObject: jest.fn() },
+  }),
+  {
+    virtual: true,
+  }
+);
 jest.mock('../Local/filesToImportBatch', () => ({
   __esModule: true,
   default: jest.fn(),
@@ -30,12 +37,24 @@ type PreviewImage = {
 };
 const request = jest.fn();
 const services = { api: { request } } as unknown as BusinessServices;
-const batch = { successes: [{ image_id: 'dicomfile:0' }] };
+const batch = {
+  successes: [{ image_id: 'dicomfile:0', study_uid: '1', series_uid: '2', sop_uid: '3' }],
+};
+const results = { revision: 0, objects: [], access: { owner_uid: 'u', can_edit: true } };
 const materials = {
+  task: { task_id: 'task', team_id: 't' },
+  access: { owner_uid: 'u', can_edit: true },
   source: {
     files: [
       { file_id: 'later', file_name: '第二.dcm', selection_index: 1 },
-      { file_id: 'first', file_name: '首个.dcm', selection_index: 0 },
+      {
+        file_id: 'first',
+        file_name: '首个.dcm',
+        selection_index: 0,
+        study_uid: '1',
+        series_uid: '2',
+        sop_uid: '3',
+      },
     ],
   },
 };
@@ -79,7 +98,10 @@ beforeEach(() => {
     .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
     .mockReturnValue('data:image/png;base64,cHJldmlldw==');
   request.mockReset();
-  request.mockResolvedValueOnce(materials).mockResolvedValueOnce(new Blob(['合成影像']));
+  request
+    .mockResolvedValue(results)
+    .mockResolvedValueOnce(materials)
+    .mockResolvedValueOnce(new Blob(['合成影像']));
   (filesToImportBatch as jest.Mock).mockResolvedValue(batch);
   (releaseImportBatch as jest.Mock).mockReturnValue(true);
   (imageLoader.loadAndCacheImage as jest.Mock).mockImplementation(async () => image);
@@ -91,7 +113,9 @@ afterEach(() => {
 });
 
 async function renderPreview() {
-  const view = render(React.createElement(TaskPreview, { taskId: 'task', services }));
+  const view = render(
+    React.createElement(TaskPreview, { taskId: 'task', services, accountUid: 'u' })
+  );
   await screen.findByRole('img', { name: '任务来源影像首帧' });
   return view;
 }
@@ -179,7 +203,7 @@ test.each(['request', 'decode', 'emptyBatch'])('%s失败显示占位且不写入
     (filesToImportBatch as jest.Mock).mockResolvedValue({ successes: [] });
   }
   await act(async () => {
-    render(React.createElement(TaskPreview, { taskId: 'task', services }));
+    render(React.createElement(TaskPreview, { taskId: 'task', services, accountUid: 'u' }));
   });
   expect(screen.getByText('影像预览暂不可用')).toBeTruthy();
   expect(screen.queryByRole('img')).toBeNull();
@@ -192,7 +216,7 @@ test.each(['request', 'decode', 'emptyBatch'])('%s失败显示占位且不写入
 test('没有来源文件时保留占位，不下载或解码', async () => {
   request.mockReset().mockResolvedValue({ source: { files: [] } });
   await act(async () => {
-    render(React.createElement(TaskPreview, { taskId: 'task', services }));
+    render(React.createElement(TaskPreview, { taskId: 'task', services, accountUid: 'u' }));
   });
   expect(request).toHaveBeenCalledTimes(1);
   expect(filesToImportBatch).not.toHaveBeenCalled();
@@ -201,7 +225,7 @@ test('没有来源文件时保留占位，不下载或解码', async () => {
 
 test('没有Canvas上下文时仍释放导入资源', async () => {
   jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
-  render(React.createElement(TaskPreview, { taskId: 'task', services }));
+  render(React.createElement(TaskPreview, { taskId: 'task', services, accountUid: 'u' }));
   await waitFor(() => expect(releaseImportBatch).toHaveBeenCalledWith(batch));
   expect(screen.queryByRole('img')).toBeNull();
 });
@@ -209,7 +233,9 @@ test('没有Canvas上下文时仍释放导入资源', async () => {
 test.each(['resolve', 'reject'])('卸载取消请求并忽略文件下载晚%s', async settlement => {
   const download = deferred<Blob>();
   request.mockReset().mockResolvedValueOnce(materials).mockReturnValueOnce(download.promise);
-  const view = render(React.createElement(TaskPreview, { taskId: 'task', services }));
+  const view = render(
+    React.createElement(TaskPreview, { taskId: 'task', services, accountUid: 'u' })
+  );
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
   const signal = request.mock.calls[1][1].signal;
   view.unmount();
@@ -228,7 +254,9 @@ test.each(['resolve', 'reject'])('卸载取消请求并忽略文件下载晚%s',
 test('卸载后解析完成仍释放本批资源且不启动解码', async () => {
   const parsing = deferred<typeof batch>();
   (filesToImportBatch as jest.Mock).mockReturnValue(parsing.promise);
-  const view = render(React.createElement(TaskPreview, { taskId: 'task', services }));
+  const view = render(
+    React.createElement(TaskPreview, { taskId: 'task', services, accountUid: 'u' })
+  );
   await waitFor(() => expect(filesToImportBatch).toHaveBeenCalledTimes(1));
   view.unmount();
   await act(async () => parsing.resolve(batch));
@@ -241,4 +269,20 @@ test('已完成的预览卸载时取消请求并保持资源可幂等释放', as
   view.unmount();
   expect(request.mock.calls[0][1].signal.aborted).toBe(true);
   expect(releaseImportBatch).toHaveBeenCalledWith(batch);
+});
+
+test('预览解码资源使用本次独立imageId强制释放，不清除其他工作台缓存', async () => {
+  await renderPreview();
+  expect(cache.removeImageLoadObject).toHaveBeenCalledWith('dicomfile:0', { force: true });
+  expect(cache.removeImageLoadObject).toHaveBeenCalledTimes(1);
+});
+
+test('源文件实际UID与后端索引不符时不得绘制错误切片', async () => {
+  (filesToImportBatch as jest.Mock).mockResolvedValue({
+    successes: [{ image_id: 'dicomfile:0', study_uid: '1', series_uid: '2', sop_uid: '999' }],
+  });
+  render(React.createElement(TaskPreview, { taskId: 'task', services, accountUid: 'u' }));
+  await screen.findByText('源文件身份与任务索引不匹配');
+  expect(imageLoader.loadAndCacheImage).not.toHaveBeenCalled();
+  expect(putImageData).not.toHaveBeenCalled();
 });

@@ -52,7 +52,7 @@ test('团队二级菜单在原面板旁展开，键盘分层关闭且不查询�
   page.on('request', request => {
     if (new URL(request.url()).pathname.startsWith('/api/v1/')) requests.push(request.url());
   });
-  const trigger = page.getByRole('menuitem', { name: '查看你的团队' });
+  const trigger = page.getByRole('menuitem', { name: '查看我的团队' });
   const menu = page.getByRole('menu', { name: '团队列表' });
   await member.click();
   await trigger.click();
@@ -95,7 +95,7 @@ test('窄屏展开的团队菜单保持在视口内', async ({ page }, testInfo)
   await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/local-mask');
   await page.getByRole('button', { name: '成员', exact: true }).click();
-  await page.getByRole('menuitem', { name: '查看你的团队' }).click();
+  await page.getByRole('menuitem', { name: '查看我的团队' }).click();
   const menu = page.getByRole('menu', { name: '团队列表' });
   await expect(menu).toBeVisible();
   const bounds = await menu.boundingBox();
@@ -126,7 +126,7 @@ test('完整字符按键不触发底层快捷键，外部点击关闭后保留�
     document.body.append(input);
   });
   await page.keyboard.press('i');
-  await page.getByRole('menuitem', { name: '查看你的团队' }).click();
+  await page.getByRole('menuitem', { name: '查看我的团队' }).click();
   await page.keyboard.press('i');
   await expect(page.locator('html')).toHaveAttribute('data-team-menu-keys', '');
   await page.getByRole('menu', { name: '团队列表' }).click({ position: { x: 12, y: 12 } });

@@ -19,7 +19,11 @@ type Props = {
   onRead?(count: number): void;
 };
 const message = (failure: unknown) =>
-  failure instanceof Error ? failure.message : '操作失败，请重试。';
+  (failure as { reason?: string })?.reason === 'INVITATION_EXPIRED'
+    ? '邀请已过期'
+    : failure instanceof Error
+      ? failure.message
+      : '操作失败，请重试。';
 const itemKey = (item: NotificationItem) =>
   item.kind === 'team_join' ? `team:${item.invitation.invitation_id}` : `mock:${item.mock_id}`;
 

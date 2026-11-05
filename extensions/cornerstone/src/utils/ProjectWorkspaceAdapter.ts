@@ -12,6 +12,7 @@ type Pixels = CoreTypes.PixelDataTypedArray;
 type Frame = { referenceId: string; rows: number; columns: number; pixels: Pixels };
 type Snapshot = {
   taskId: string;
+  presentation?: Record<string, { color: string; lineWidth: number }>;
   annotations: ToolTypes.Annotation[];
   measurements: Record<string, unknown>[];
   segmentations: Array<{
@@ -147,6 +148,29 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
           )
         );
       const segmentations = services.segmentationService.getSegmentations().map(mask => {
+        const representation = services.segmentationService.getRepresentationsForSegmentation(
+          mask.segmentationId
+        )[0];
+        const colors: Record<number, CoreTypes.Color> = {},
+          visible: Record<number, boolean> = {};
+        if (representation) {
+          for (const index of Object.keys(mask.segments).map(Number)) {
+            colors[index] = [
+              ...services.segmentationService.getSegmentColor(
+                representation.viewportId,
+                mask.segmentationId,
+                index
+              ),
+            ] as CoreTypes.Color;
+            visible[index] = representation.representations[0]?.segments?.[index]?.visible ?? true;
+          }
+        }
+        if (!representation)
+          for (const [index, segment] of Object.entries(mask.segments)) {
+            const color = (segment as typeof segment & { color?: CoreTypes.Color }).color;
+            if (color) colors[Number(index)] = [...color] as CoreTypes.Color;
+          }
+
         if (!mask.representationData.Labelmap) {
           const contour = mask.representationData.Contour;
           if (!contour) throw new Error('不支持的成果表示，未保存');
@@ -172,8 +196,8 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
             contour: cloneDeep(contour),
             geometries,
             frames: [],
-            colors: {},
-            visible: {},
+            colors,
+            visible,
           };
         }
         const frames = (
@@ -195,28 +219,6 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
             pixels: image.voxelManager.getScalarData().slice() as Pixels,
           };
         });
-        const representation = services.segmentationService.getRepresentationsForSegmentation(
-          mask.segmentationId
-        )[0];
-        const colors: Record<number, CoreTypes.Color> = {},
-          visible: Record<number, boolean> = {};
-        if (representation) {
-          for (const index of Object.keys(mask.segments).map(Number)) {
-            colors[index] = [
-              ...services.segmentationService.getSegmentColor(
-                representation.viewportId,
-                mask.segmentationId,
-                index
-              ),
-            ] as CoreTypes.Color;
-            visible[index] = representation.representations[0]?.segments?.[index]?.visible ?? true;
-          }
-        }
-        if (!representation)
-          for (const [index, segment] of Object.entries(mask.segments)) {
-            const color = (segment as typeof segment & { color?: CoreTypes.Color }).color;
-            if (color) colors[Number(index)] = [...color] as CoreTypes.Color;
-          }
         return {
           segmentationId: mask.segmentationId,
           label: mask.label,
@@ -228,6 +230,24 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
       });
       return {
         taskId: project.task_id!,
+        presentation: Object.fromEntries(
+          annotations.map(item => [
+            item.annotationUID,
+            {
+              color: annotation.config.style.getStyleProperty('color', {
+                annotationUID: item.annotationUID,
+                toolName: item.metadata.toolName,
+              }),
+              lineWidth:
+                Number(
+                  annotation.config.style.getStyleProperty('lineWidth', {
+                    annotationUID: item.annotationUID,
+                    toolName: item.metadata.toolName,
+                  })
+                ) || 1,
+            },
+          ])
+        ),
         annotations: cloneDeep(annotations),
         measurements: cloneDeep(measurements),
         segmentations,
@@ -261,6 +281,23 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
     },
     async exportArtifacts(project) {
       const state = adapter.capture(project) as Snapshot;
+      // capture保留本页快照；确认包只保留成果，临时展示不能制造新修订。
+      for (const item of state.annotations) {
+        delete item.highlighted;
+        delete item.isSelected;
+        delete item.isVisible;
+        delete item.invalidated;
+        if (item.data.handles) delete item.data.handles.activeHandleIndex;
+      }
+      for (const item of state.measurements) {
+        delete item.isSelected;
+        delete item.isVisible;
+      }
+      for (const mask of state.segmentations) {
+        mask.visible = {};
+        for (const segment of Object.values(mask.segments))
+          delete (segment as { active?: boolean }).active;
+      }
       const artifacts: import('@ohif/core').ResultArtifact[] = [];
       const contourIds = new Set(
         state.annotations
@@ -316,6 +353,7 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
       };
       for (const artifact of artifacts) {
         const value = (await decodeResult(project, artifact)) as Snapshot;
+        state.presentation = { ...state.presentation, ...value.presentation };
         state.annotations.push(...value.annotations);
         state.measurements.push(...value.measurements);
         state.segmentations.push(...value.segmentations);
@@ -327,6 +365,11 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
         if (imageBelongs(project, item.metadata.referencedImageId))
           annotation.state.removeAnnotation(item.annotationUID);
       await adapter.restore(project, state, signal);
+      for (const [id, style] of Object.entries(state.presentation ?? {}))
+        annotation.config.style.setAnnotationStyles(id, {
+          color: style.color,
+          lineWidth: String(style.lineWidth),
+        });
     },
     async restore(project: LocalProject, value: unknown, signal: AbortSignal) {
       check(signal);
@@ -352,6 +395,14 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
         }
         check(signal);
         for (const mask of state.segmentations) {
+          const segments = cloneDeep(mask.segments);
+          if (!Object.values(segments).some(segment => (segment as { active?: boolean }).active)) {
+            const first = Object.keys(segments)
+              .map(Number)
+              .filter(index => index > 0)
+              .sort((a, b) => a - b)[0];
+            if (first !== undefined) segments[first].active = true;
+          }
           if (mask.contour) {
             for (const geometry of mask.geometries ?? [])
               await geometryLoader.createAndCacheGeometry(geometry.id, {
@@ -364,14 +415,22 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
                 type: Enums.SegmentationRepresentations.Contour,
                 data: cloneDeep(mask.contour),
               },
-              config: { label: mask.label, segments: cloneDeep(mask.segments) },
+              config: { label: mask.label, segments },
             });
-            for (const viewportId of viewportIds())
+            for (const viewportId of viewportIds()) {
               await services.segmentationService.addSegmentationRepresentation(viewportId, {
                 segmentationId: mask.segmentationId,
                 type: Enums.SegmentationRepresentations.Contour,
                 suppressEvents: true,
               });
+              for (const [index, color] of Object.entries(mask.colors))
+                services.segmentationService.setSegmentColor(
+                  viewportId,
+                  mask.segmentationId,
+                  Number(index),
+                  color
+                );
+            }
             continue;
           }
           if (mask.frames.some(frame => !belongs(frame.referenceId))) {
@@ -413,7 +472,7 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
                 referencedImageIds: mask.frames.map(frame => frame.referenceId),
               },
             },
-            config: { label: mask.label, segments: cloneDeep(mask.segments) },
+            config: { label: mask.label, segments },
           });
           for (const viewportId of viewportIds()) {
             check(signal);
@@ -460,6 +519,12 @@ export default function createProjectWorkspaceAdapter(services: Services): Proje
             }
           }
           const native = cloneDeep(item);
+          // 确认包不携带临时状态；原生绘制器以null表示没有活动手柄，undefined并不等价。
+          native.highlighted ??= false;
+          native.isVisible ??= true;
+          native.isSelected ??= false;
+          native.invalidated = true;
+          if (native.data.handles) native.data.handles.activeHandleIndex ??= null;
           annotation.state.getAnnotationManager().addAnnotation(native);
           if (measurement) {
             if (!source?.annotationToMeasurement) {

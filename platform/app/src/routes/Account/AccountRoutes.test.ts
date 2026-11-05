@@ -107,7 +107,7 @@ test('原注册入口可达，注册成功到受保护真实邀请页，不伪�
   fireEvent.click(screen.getByRole('button', { name: '下一步' }));
   expect(await screen.findByRole('heading', { name: '是否还有其他人加入你？' })).toBeTruthy();
   expect(screen.getByTestId('route').textContent).toBe('/account/invite');
-  expect(screen.getByRole('button', { name: '完成' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '邀请' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '跳过' })).toBeTruthy();
   expect(screen.queryByText(/已加入/)).toBeNull();
 });

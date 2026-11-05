@@ -73,7 +73,7 @@ class InvitationReadIT extends InvitationTestSupport {
             http.perform(get(path + "?" + query).header("Authorization", token(owner))).andExpect(status().isUnprocessableEntity());
     }
 
-    @Test void ownerSeesAcceptedMembersOnlyAndOtherRolesGet403Or404() throws Exception {
+    @Test void membersSeeAcceptedMembersOnlyAndNonmembersGet404() throws Exception {
         var owner = register("owner"); var user = register("recipient"); var pending = register("pending"); var stranger = register("stranger");
         var invitation = invite(owner, user); invite(owner, pending);
         assertThat(read(owner, membersPath(owner)).at("/meta/total").asInt()).isEqualTo(1);
@@ -86,7 +86,7 @@ class InvitationReadIT extends InvitationTestSupport {
             assertThat(member.size()).isEqualTo(5); assertThat(member.has("joined_at")).isTrue(); assertThat(member.get("avatar_url").isNull()).isTrue();
             if (member.path("uid").asText().equals(uid(user))) assertThat(member.path("role").asText()).isEqualTo("annotator");
         }
-        http.perform(get(membersPath(owner)).header("Authorization", token(user))).andExpect(status().isForbidden());
+        http.perform(get(membersPath(owner)).header("Authorization", token(user))).andExpect(status().isOk());
         http.perform(get(membersPath(owner)).header("Authorization", token(stranger))).andExpect(status().isNotFound());
         http.perform(get("/api/v1/teams/missing/members").header("Authorization", token(owner))).andExpect(status().isNotFound());
         for (String path : List.of(NOTIFICATIONS, membersPath(owner))) http.perform(get(path)).andExpect(status().isUnauthorized());

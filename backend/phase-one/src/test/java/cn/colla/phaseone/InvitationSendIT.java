@@ -36,15 +36,15 @@ class InvitationSendIT extends InvitationTestSupport {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM team_member", Integer.class)).isEqualTo(2);
     }
 
-    @Test void onlyVisibleOwnerMaySendAndAnonymousCannotSend() throws Exception {
+    @Test void validMemberMaySendButNonmemberAndAnonymousCannotSend() throws Exception {
         var owner = register("owner"); var user = register("user"); var target = register("target");
         send(user, team(owner), "target").andExpect(status().isNotFound());
         jdbc.update("INSERT INTO team_member VALUES(?,?,'annotator',CURRENT_TIMESTAMP)", team(owner), uid(user));
-        send(user, team(owner), "target").andExpect(status().isForbidden());
+        send(user, team(owner), "target").andExpect(status().isCreated());
         send(owner, "absent", "target").andExpect(status().isNotFound());
         http.perform(post("/api/v1/teams/" + team(owner) + "/invitations").contentType("application/json").content("{\"username\":\"target\"}"))
             .andExpect(status().isUnauthorized());
-        assertThat(invitations()).isZero();
+        assertThat(invitations()).isEqualTo(1);
     }
 
     @Test void invalidSelfUnknownDisabledAndAlreadyMemberAreRejected() throws Exception {

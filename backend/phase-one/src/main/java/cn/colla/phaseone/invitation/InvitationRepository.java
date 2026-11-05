@@ -27,24 +27,38 @@ public class InvitationRepository {
     public boolean isMember(String teamId, String uid) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM team_member WHERE team_id=? AND uid=?", Integer.class, teamId, uid) > 0;
     }
-    public boolean coolingDown(String teamId, String uid, Instant now) {
+    public boolean coolingDown(String teamId, String sender, String uid, Instant now) {
         // 任一尚未到期记录都保留窗口，不受接受／拒绝或时间相同的排序影响。
-        return jdbc.queryForObject("SELECT COUNT(*) FROM team_invitation WHERE team_id=? AND invitee_uid=? AND expires_at>?",
-            Integer.class, teamId, uid, utc(now)) > 0;
+        return jdbc.queryForObject("SELECT COUNT(*) FROM team_invitation WHERE team_id=? AND inviter_uid=? AND invitee_uid=? AND expires_at>?",
+            Integer.class, teamId, sender, uid, utc(now)) > 0;
     }
     public void insert(String id, String teamId, String sender, String recipient, Instant now) {
         jdbc.update("INSERT INTO team_invitation(invitation_id,team_id,inviter_uid,invitee_uid,created_at,expires_at,decision,decided_at) VALUES(?,?,?,?,?,?,'pending',NULL)", id, teamId, sender, recipient, utc(now), utc(now.plusSeconds(300)));
     }
-    public record DecisionRow(String teamId, String recipient, Instant expiresAt, String decision) {}
+    public record DecisionRow(String teamId, String recipient, Instant expiresAt, String decision, Instant invalidatedAt) {}
     public String visibleTeam(String id, String recipient) {
         return jdbc.queryForList("SELECT team_id FROM team_invitation WHERE invitation_id=? AND invitee_uid=?", String.class, id, recipient)
             .stream().findFirst().orElseThrow(InvitationRepository::notFound);
     }
     public DecisionRow lockInvitation(String id, String recipient) {
-        return jdbc.query("SELECT team_id,invitee_uid,expires_at,decision FROM team_invitation WHERE invitation_id=? AND invitee_uid=? FOR UPDATE",
+        return jdbc.query("SELECT team_id,invitee_uid,expires_at,decision,invalidated_at FROM team_invitation WHERE invitation_id=? AND invitee_uid=? FOR UPDATE",
             (r, n) -> new DecisionRow(r.getString("team_id"), r.getString("invitee_uid"),
-                r.getObject("expires_at", OffsetDateTime.class).toInstant(), r.getString("decision")), id, recipient)
+                r.getObject("expires_at", OffsetDateTime.class).toInstant(), r.getString("decision"), r.getObject("invalidated_at", OffsetDateTime.class) == null ? null : r.getObject("invalidated_at", OffsetDateTime.class).toInstant()), id, recipient)
             .stream().findFirst().orElseThrow(InvitationRepository::notFound);
+    }
+    public void invalidateOthers(String teamId, String recipient, String acceptedId, Instant now) {
+        jdbc.update("UPDATE team_invitation SET invalidated_at=? WHERE team_id=? AND invitee_uid=? AND invitation_id<>? AND decision='pending' AND invalidated_at IS NULL AND expires_at>?",
+            utc(now), teamId, recipient, acceptedId, utc(now));
+    }
+    public SentPage sent(String teamId, String sender, PageQuery page, Instant now) {
+        String condition = " WHERE i.team_id=? AND i.inviter_uid=? AND i.expires_at>?";
+        long total = jdbc.queryForObject("SELECT COUNT(*) FROM team_invitation i" + condition, Long.class, teamId, sender, utc(now));
+        var rows = jdbc.query("SELECT i.*,u.username FROM team_invitation i JOIN app_user u ON u.uid=i.invitee_uid" + condition + " ORDER BY i.created_at ASC,i.invitation_id ASC LIMIT ? OFFSET ?",
+            (r, n) -> new SentInvitationDeadline(r.getString("invitation_id"), r.getString("team_id"),
+                new Invitee(r.getString("invitee_uid"), r.getString("username")),
+                r.getObject("created_at", OffsetDateTime.class).toInstant(), r.getObject("expires_at", OffsetDateTime.class).toInstant()),
+            teamId, sender, utc(now), page.size(), page.offset());
+        return new SentPage(rows, new SentMeta(page.page(), page.size(), total, now));
     }
     public void addAnnotator(String teamId, String recipient, Instant now) {
         jdbc.update("INSERT INTO team_member(team_id,uid,role,joined_at) VALUES(?,?,'annotator',?)", teamId, recipient, utc(now));

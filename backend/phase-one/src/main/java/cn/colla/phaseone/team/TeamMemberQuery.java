@@ -13,7 +13,7 @@ public class TeamMemberQuery {
     public TeamMemberQuery(JdbcTemplate jdbc, TeamPolicy teams) { this.jdbc = jdbc; this.teams = teams; }
     public record MemberView(String uid, String username, String avatar_url, String role, Instant joined_at) {}
     public Page<MemberView> list(String actor, String teamId, PageQuery page) {
-        teams.requireOwner(actor, teamId);
+        teams.requireMember(actor, teamId);
         long total = jdbc.queryForObject("SELECT COUNT(*) FROM team_member WHERE team_id=?", Long.class, teamId);
         var rows = jdbc.query("""
             SELECT u.uid,u.username,u.avatar_url,m.role,m.joined_at FROM team_member m JOIN app_user u ON u.uid=m.uid

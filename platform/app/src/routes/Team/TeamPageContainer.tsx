@@ -9,11 +9,13 @@ type Props = {
   onViewChange(view: TeamPageView): void;
   createTaskSlot?: React.ReactNode;
   memberSlot?: React.ReactNode;
+  teamSelectorSlot?: React.ReactNode;
+  teamActionsSlot?: React.ReactNode;
   notificationSlot?: React.ReactNode;
   taskStatusSlot?: React.ReactNode;
   onOpenTask?(taskId: string): void;
   canOpenTask?(taskId: string): boolean;
-  renderPreview?(taskId: string): React.ReactNode;
+  renderPreview?(taskId: string, generation: number): React.ReactNode;
   openingTaskId?: string | null;
 };
 
@@ -69,6 +71,7 @@ function ReadTeamPage({
     <TeamPage
       {...props}
       state={state}
+      previewGeneration={attempt}
       onRefresh={() => refresh(value => value + 1)}
     />
   );

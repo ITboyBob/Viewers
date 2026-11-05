@@ -34,6 +34,11 @@ public final class InvitationDtos {
             catch (NumberFormatException invalid) { throw ApiException.validation(); }
         }
     }
+    public record Invitee(String uid, String username) {}
+    public record SentInvitationDeadline(String invitation_id, String team_id, Invitee invitee,
+        Instant created_at, Instant expires_at) {}
+    public record SentMeta(int page, int page_size, long total, Instant server_time) {}
+    public record SentPage(List<SentInvitationDeadline> data, SentMeta meta) {}
     public record InvitationView(String invitation_id, String team_id, String team_name,
         UserSummary inviter, String invitee_uid, Instant created_at, Instant expires_at,
         String decision, Instant decided_at, Instant read_at) {}

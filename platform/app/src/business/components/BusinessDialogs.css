@@ -387,3 +387,56 @@
 .business-member-panel .business-logout:focus-visible {
   outline: 2px solid var(--account-primary, #358cfd);
 }
+
+.team-member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+}
+.team-member-actions > button,
+.team-page-team-switch {
+  background: transparent;
+  border: 0;
+  color: var(--account-primary, #358cfd);
+  cursor: pointer;
+  padding: 4px 0;
+  text-align: left;
+}
+.team-member-actions button:focus-visible,
+.team-page-team-switch:focus-visible {
+  outline: 2px solid var(--account-primary, #358cfd);
+}
+.team-invite-form {
+  display: grid;
+  gap: 16px;
+}
+.team-invite-form [role='alert'] {
+  color: var(--account-muted, #7db3cf);
+  overflow-wrap: anywhere;
+}
+.team-invite-form [role='alert'] button {
+  color: var(--account-primary, #358cfd);
+}
+.business-dialog--members {
+  width: min(480px, calc(100vw - 32px));
+}
+.team-member-list {
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+}
+.team-member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+.team-member-row > span:last-child {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.team-page-team-switch {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}

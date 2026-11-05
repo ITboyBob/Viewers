@@ -123,6 +123,11 @@ export class BusinessApiClient implements BusinessApi {
       if (!Object.prototype.hasOwnProperty.call(payload, 'data')) {
         throw new BusinessApiError(502, 'INVALID_RESPONSE', '服务响应不符合业务契约');
       }
+      if (options.responseType === 'page') {
+        if (!payload.meta || typeof payload.meta !== 'object')
+          throw new BusinessApiError(502, 'INVALID_RESPONSE', '分页响应缺少元数据');
+        return payload as T;
+      }
       return payload.data as T;
     } catch (error) {
       if (error instanceof BusinessApiError) {

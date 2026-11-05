@@ -1,5 +1,5 @@
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import buildModeRoutes from './buildModeRoutes';
 let mockEnabled = true,
@@ -27,8 +27,10 @@ jest.mock(
   }),
   { virtual: true }
 );
+let mockBusiness: any;
 const h = React.createElement;
 beforeEach(() => {
+  mockBusiness = undefined;
   mockEnabled = true;
   mockSource = 'dicomlocal';
 });
@@ -45,7 +47,7 @@ function routes() {
       getActiveDataSourceDefinition: () => (mockSource ? { sourceName: mockSource } : null),
     },
     servicesManager: {
-      services: { businessServices: { projectRuntime: { phaseOneMask: false } } },
+      services: { businessServices: mockBusiness ?? { projectRuntime: { phaseOneMask: false } } },
     },
     commandsManager: {},
     hotkeysManager: {},
@@ -53,7 +55,14 @@ function routes() {
 }
 function open(path: string, url: string, state?: unknown) {
   const entry = routes().find(route => route.path === path);
-  return render(h(MemoryRouter, { initialEntries: [{ pathname: url, state }] }, h(entry.children)));
+  const location = new URL(url, 'http://test');
+  return render(
+    h(
+      MemoryRouter,
+      { initialEntries: [{ pathname: location.pathname, search: location.search, state }] },
+      h(entry.children)
+    )
+  );
 }
 test('去重数据源且保留每个mode显式和活动数据源入口', () => {
   const entries = routes();
@@ -89,4 +98,37 @@ test('刷新或旧URL缺少内存project时提示重新导入，同时保留原�
   open('segmentation/dicomlocal', '/segmentation/dicomlocal');
   expect(screen.getByRole('status').textContent).toContain('请重新导入');
   expect(screen.getByTestId('mode-marker')).toBeTruthy();
+});
+
+test('已显示的存储工作台失效后不进入假加载、不重新读取且保留禁用的原页面', () => {
+  const task = '10000000-0000-4000-8000-000000000001';
+  let current: any = { task_id: task, source_stored: true };
+  let emit = () => {};
+  const request = jest.fn();
+  mockBusiness = {
+    projectRuntime: { phaseOneMask: true, getCurrent: () => current },
+    localProjects: {
+      subscribe: (fn: () => void) => {
+        emit = fn;
+        return () => {};
+      },
+    },
+    taskStorage: { open: request },
+  };
+  const view = open('segmentation/dicomlocal', `/segmentation/dicomlocal?task_id=${task}`);
+  const marker = screen.getByTestId('mode-marker');
+  current = null;
+  act(() => emit());
+  expect(screen.queryByText('正在从后端加载任务…')).toBeNull();
+  expect(screen.getByTestId('mode-marker')).toBe(marker);
+  expect(marker.closest('[inert]')).not.toBeNull();
+  expect(request).not.toHaveBeenCalled();
+  const shortcut = jest.fn();
+  document.addEventListener('keydown', shortcut);
+  fireEvent.keyDown(document, { key: 'i' });
+  expect(shortcut).not.toHaveBeenCalled();
+  view.unmount();
+  fireEvent.keyDown(document, { key: 'i' });
+  expect(shortcut).toHaveBeenCalledTimes(1);
+  document.removeEventListener('keydown', shortcut);
 });

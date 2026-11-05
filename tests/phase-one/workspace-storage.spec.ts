@@ -165,7 +165,7 @@ test('任务卡片在团队与最近看板及刷新后显示非黑影像预览',
         'aria-current',
         'page'
       );
-      const preview = page.locator(`[data-task-id="${task.task_id}"] img`);
+      const preview = page.locator(`[data-task-card="${task.task_id}"] img`);
       await expect(preview).toBeVisible({ timeout: 30000 });
       await expect
         .poll(async () =>
@@ -253,7 +253,7 @@ test('原图与非空Mask自动保存后关闭A窗口，B从后端重开并恢�
     await view.getByRole('button', { name: '我的', exact: true }).click();
     await view.getByRole('menuitem', { name: '查看我的团队' }).click();
     await view.getByRole('menuitemradio', { name: new RegExp(a.user.username) }).click();
-    await expect(view.locator(`[data-task-id="${task.task_id}"] img`)).toBeVisible({
+    await expect(view.locator(`[data-task-card="${task.task_id}"] img`)).toBeVisible({
       timeout: 30000,
     });
     await view.locator(`[data-task-id="${task.task_id}"]`).click();
@@ -270,9 +270,14 @@ test('原图与非空Mask自动保存后关闭A窗口，B从后端重开并恢�
         const group = s.toolGroupService.getToolGroupForViewport(
           s.viewportGridService.getActiveViewportId()
         );
-        return group.getToolInstances().CircularBrush.mode;
+        return {
+          mode: group.getToolInstances().CircularBrush.mode,
+          segment: s.segmentationService.getActiveSegment(
+            s.viewportGridService.getActiveViewportId()
+          )?.segmentIndex,
+        };
       })
-    ).toBe('Active');
+    ).toEqual({ mode: 'Active', segment: 1 });
     await view.evaluate(() => window.dispatchEvent(new Event('offline')));
     await expect(
       view.getByRole('status').filter({ hasText: '连接已断开，编辑暂停' })

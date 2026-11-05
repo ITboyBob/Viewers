@@ -33,6 +33,9 @@ export class TaskAutoSave {
     private active: () => boolean,
     private delay = 1000
   ) {}
+  get isRestoring() {
+    return this.restoring;
+  }
   get hasPending() {
     return this.generation !== this.acknowledged || !!this.pending;
   }

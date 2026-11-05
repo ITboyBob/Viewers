@@ -173,3 +173,17 @@ test('幂等键通过专用选项发送，不覆盖既有业务凭证，非法�
   });
   expect(transport).toHaveBeenCalledTimes(1);
 });
+
+test('分页读取保留meta而不改变既有data解包契约', async () => {
+  const envelope = {
+    data: [],
+    meta: { page: 1, page_size: 100, total: 0, server_time: '2026-11-04T00:00:00Z' },
+  };
+  const api = new BusinessApiClient({
+    fetch: jest.fn().mockResolvedValue(response(200, envelope)),
+  });
+  await expect(api.request('/teams/t/invitations/sent', { responseType: 'page' })).resolves.toEqual(
+    envelope
+  );
+  await expect(api.request('/teams/t/invitations/sent')).resolves.toEqual([]);
+});

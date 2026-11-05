@@ -1,3 +1,4 @@
+import { isImportComplete, workspaceReady } from './businessImport';
 import {
   test,
   expect,
@@ -15,8 +16,7 @@ import { syntheticSeries } from './syntheticDicom';
 
 const password = 'team-create-synthetic';
 const storageKey = 'colla.phaseOne.session';
-const isTaskPost = (url: string, method: string) =>
-  method === 'POST' && /^\/api\/v1\/teams\/[^/]+\/tasks$/.test(new URL(url).pathname);
+const isTaskPost = (url: string, method: string) => method === 'POST' && isImportComplete(url);
 async function register(request: APIRequestContext) {
   const response = await request.post('/api/v1/users', {
     data: { username: `新建验收-${randomUUID().slice(0, 8)}`, password },
@@ -44,6 +44,14 @@ async function enter(
     },
     { session, currentTeam, storageKey }
   );
+  expect(
+    (
+      await page.request.put('/api/v1/auth/sessions/current/team', {
+        headers: { Authorization: `Bearer ${session.token}` },
+        data: { team_id: currentTeam },
+      })
+    ).status()
+  ).toBe(200);
   await page.goto(path);
   await expect(page.getByRole('button', { name: '创建新任务' })).toBeEnabled();
 }
@@ -80,9 +88,9 @@ for (const view of ['team', 'recent'] as const) {
     await expect(page.getByText('团队空间', { exact: true })).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath(`${view}-创建入口.png`) });
     await page.getByRole('button', { name: '我的', exact: true }).click();
-    await page.getByRole('menuitem', { name: '查看你的团队' }).click();
+    await page.getByRole('menuitem', { name: '查看我的团队' }).click();
     const menu = page.getByRole('menu', { name: '团队列表', exact: true });
-    await expect(menu.getByRole('menuitemradio')).toHaveCount(1);
+    await expect(menu.getByRole('menuitemradio')).toHaveCount(2);
     await expect(menu).toContainText(member.memberships[0].name);
     await expect(menu.getByText(/示例团队|团队 A|团队 B/)).toHaveCount(0);
     await menu.screenshot({ path: testInfo.outputPath(`${view}-团队菜单.png`) });
@@ -98,12 +106,13 @@ for (const view of ['team', 'recent'] as const) {
     );
     await selection.setFiles(sample.files);
     const response = await written;
-    expect(response.status()).toBe(201);
-    expect(new URL(response.url()).pathname).toBe(`/api/v1/teams/${expectedTeam}/tasks`);
+    expect(response.status()).toBe(200);
+    expect(isImportComplete(response.url())).toBe(true);
     const task: BusinessTask = (await response.json()).data;
     expect(task.team_id).toBe(expectedTeam);
     expect(task.assignee_uid).toBe(member.user.uid);
-    expect(response.request().postDataJSON()).toEqual({ title: sample.files[0].name });
+    expect(task.title).toBe(sample.files[0].name);
+    expect(response.request().postDataJSON()).toBeNull();
     await expect(page).toHaveURL(/\/segmentation\/dicomlocal\?/);
     expect(new URL(page.url()).searchParams.getAll('StudyInstanceUIDs')).toEqual([sample.study]);
     await expect(page.locator('canvas').first()).toBeVisible();
@@ -189,14 +198,14 @@ test('列表读取失败仍可创建；全失败不登记，部分成功与丢�
   expect(posts).toBe(0);
   await expect(page).toHaveURL(/\/team\/tasks$/);
   const records: Array<{ key: string; task: string; status: number }> = [];
-  await page.route('**/api/v1/teams/*/tasks', async route => {
+  await page.route('**/api/v1/task-imports/*/complete', async route => {
     if (route.request().method() !== 'POST') {
       await route.fallback();
       return;
     }
     const response = await route.fetch();
     records.push({
-      key: route.request().headers()['idempotency-key'],
+      key: new URL(route.request().url()).pathname.split('/')[4],
       task: (await response.json()).data.task_id,
       status: response.status(),
     });
@@ -210,7 +219,7 @@ test('列表读取失败仍可创建；全失败不登记，部分成功与丢�
   await page.getByRole('button', { name: '重试登记' }).click();
   await expect(page).toHaveURL(/\/segmentation\/dicomlocal\?/);
   expect(records).toHaveLength(2);
-  expect(records[0].status).toBe(201);
+  expect(records[0].status).toBe(200);
   expect(records[1]).toEqual({ ...records[0], status: 200 });
   await expect(page.locator('canvas').first()).toBeVisible();
 });
