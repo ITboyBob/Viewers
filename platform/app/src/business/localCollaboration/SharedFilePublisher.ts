@@ -70,6 +70,24 @@ export class SharedFilePublisher implements SharedFilePublicationPort {
       snapshot.context?.user.uid === preparation.uid
     );
   }
+  // 生命周期归属与当前鉴权就绪不同；loading/error 不能成为永久取消的依据。
+  private owned(preparation: Preparation) {
+    const snapshot = this.dependencies.session.getSnapshot();
+    const project = preparation.project;
+    return (
+      !preparation.cancelled &&
+      this.current === preparation &&
+      preparation.generation === this.dependencies.generation() &&
+      !!project &&
+      this.dependencies.projects.getCurrent() === project &&
+      project.phase !== 'invalid' &&
+      project.phase !== 'disposed' &&
+      preparation.source?.getSnapshot().publication_phase !== 'cancelled' &&
+      (snapshot.status === 'loading' ||
+        snapshot.status === 'error' ||
+        (snapshot.status === 'authenticated' && snapshot.context?.user.uid === preparation.uid))
+    );
+  }
   publish(project: LocalProject): Promise<void> {
     const preparation = this.current;
     if (
@@ -94,12 +112,14 @@ export class SharedFilePublisher implements SharedFilePublicationPort {
     return preparation.pending;
   }
   private async write(preparation: Preparation, project: LocalProject) {
+    const controller = new AbortController();
+    preparation.controller = controller;
     try {
       const source = preparation.source ?? this.dependencies.identities.source(project);
       preparation.source = source;
       if (!preparation.stop) {
         preparation.stop = source.subscribe(() => {
-          if (!source.isCurrent()) {
+          if (!this.owned(preparation)) {
             this.cancelPreparation(preparation);
           }
           this.emit();
@@ -134,44 +154,67 @@ export class SharedFilePublisher implements SharedFilePublicationPort {
           byte_length: files[index].blob.size,
         })),
       };
-      const controller = new AbortController();
-      preparation.controller = controller;
       source.setPublication('writing');
       const saved = await this.dependencies.files.publish({ manifest, files }, controller.signal);
-      await this.waitForEntryValidation(preparation, controller.signal);
-      if (this.valid(preparation) && source.isCurrent()) {
+      await this.afterEntryValidation(preparation, () => {
         source.setPublication('ready', saved);
         preparation.files.clear();
-      } else {
-        this.cancelPreparation(preparation);
-      }
+      });
     } catch (_error) {
-      if (this.valid(preparation)) {
+      await this.afterEntryValidation(preparation, () => {
         preparation.source?.setPublication('failed', undefined, '本地共享不可用，原阅片不受影响');
-      } else {
-        this.cancelPreparation(preparation);
-      }
+      });
     }
   }
-  private waitForEntryValidation(preparation: Preparation, signal: AbortSignal): Promise<void> {
-    if (this.dependencies.session.getSnapshot().status !== 'loading' || signal.aborted) {
+  private async afterEntryValidation(preparation: Preparation, apply: () => void) {
+    while (this.owned(preparation)) {
+      await this.waitForEntryValidation(preparation);
+      // await 恢复前可能又开始一次同凭证校验，必须重新读取而非误取消。
+      if (!this.owned(preparation)) {
+        break;
+      }
+      const { status } = this.dependencies.session.getSnapshot();
+      if (status === 'loading' || status === 'error') {
+        continue;
+      }
+      if (this.valid(preparation) && preparation.source?.isCurrent()) {
+        apply();
+        return;
+      }
+      break;
+    }
+    this.cancelPreparation(preparation);
+  }
+  private waitForEntryValidation(preparation: Preparation): Promise<void> {
+    const signal = preparation.controller?.signal;
+    const waiting = () => {
+      const { status } = this.dependencies.session.getSnapshot();
+      return this.owned(preparation) && (status === 'loading' || status === 'error');
+    };
+    if (!waiting() || signal?.aborted) {
       return Promise.resolve();
     }
     return new Promise(resolve => {
+      let settled = false;
+      let stop = () => {};
       const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         stop();
-        signal.removeEventListener('abort', finish);
+        signal?.removeEventListener('abort', finish);
         resolve();
       };
-      const stop = this.dependencies.session.subscribe(() => {
-        if (
-          this.dependencies.session.getSnapshot().status !== 'loading' ||
-          preparation.generation !== this.dependencies.generation()
-        ) {
+      stop = this.dependencies.session.subscribe(() => {
+        if (!waiting()) {
           finish();
         }
       });
-      signal.addEventListener('abort', finish, { once: true });
+      signal?.addEventListener('abort', finish, { once: true });
+      if (!waiting() || signal?.aborted) {
+        finish();
+      }
     });
   }
   private cancelPreparation(preparation: Preparation) {

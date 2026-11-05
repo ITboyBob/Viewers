@@ -42,6 +42,7 @@ function setup() {
     },
   } as unknown as BusinessSession;
   const projects = {
+    getCurrent: () => project,
     isCurrent: value => value === project,
     subscribe: () => () => undefined,
   } as LocalProjects;

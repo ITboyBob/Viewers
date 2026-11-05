@@ -1,3 +1,4 @@
+import { isImportComplete } from '../phase-one/businessImport';
 import { copySharedLink } from './sharedLink';
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
@@ -27,8 +28,7 @@ async function source(page: Page, request: APIRequestContext) {
   const uid = await login(page, request, 'source');
   const sample = syntheticSeries(3);
   const registered = page.waitForResponse(
-    response =>
-      response.request().method() === 'POST' && /\/tasks$/.test(new URL(response.url()).pathname)
+    response => response.request().method() === 'POST' && isImportComplete(response.url())
   );
   await page
     .getByLabel('导入文件', { exact: true })
@@ -36,7 +36,7 @@ async function source(page: Page, request: APIRequestContext) {
       { name: '坏.dcm', mimeType: 'application/dicom', buffer: Buffer.from('invalid') },
       ...sample.files,
     ]);
-  expect((await registered).status()).toBe(201);
+  expect((await registered).status()).toBe(200);
   await expect(page.getByRole('button', { name: '共享链接', exact: true })).toBeVisible();
   const href = await copySharedLink(page);
   const original = await page.evaluate(() => {
@@ -75,7 +75,7 @@ test('G3：A一次导入，B不选文件独立进入同任务，刷新重建，A
 }) => {
   let sourceCreates = 0;
   page.on('request', req => {
-    if (req.method() === 'POST' && /\/tasks$/.test(new URL(req.url()).pathname)) {
+    if (req.method() === 'POST' && isImportComplete(req.url())) {
       sourceCreates++;
     }
   });

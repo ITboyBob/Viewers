@@ -1,3 +1,4 @@
+import { isImportComplete } from '../phase-one/businessImport';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { openChromeWindows } from './chromeWindows';
@@ -41,7 +42,7 @@ test.describe('共享入口完整用户旅程', () => {
         const a = await createAccount(request, 'copy-source');
         let creates = 0;
         windows.a.on('request', req => {
-          if (req.method() === 'POST' && /\/tasks$/.test(new URL(req.url()).pathname)) {
+          if (req.method() === 'POST' && isImportComplete(req.url())) {
             creates++;
           }
         });
