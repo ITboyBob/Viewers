@@ -1,5 +1,7 @@
 import React from 'react';
 import createProjectWorkspaceAdapter from './utils/ProjectWorkspaceAdapter';
+import { trackMaskHistory } from './utils/maskEditing/maskHistory';
+import { trackMaskProgress } from './utils/maskEditing/maskProgress';
 import * as cornerstone from '@cornerstonejs/core';
 import * as cornerstoneTools from '@cornerstonejs/tools';
 import {
@@ -97,6 +99,8 @@ const cornerstoneExtension: Types.Extensions.Extension = {
     servicesManager.services.businessServices?.projectRuntime?.setSnapshotAdapter(
       createProjectWorkspaceAdapter(servicesManager.services)
     );
+    unsubscriptions.push(trackMaskHistory(servicesManager));
+    unsubscriptions.push(trackMaskProgress(servicesManager, commandsManager));
     const { cornerstoneViewportService, toolbarService, segmentationService } =
       servicesManager.services;
 

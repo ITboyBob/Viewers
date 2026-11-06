@@ -57,12 +57,14 @@ export const SegmentationTableRoot = (props: SegmentationTableProps) => {
 
   // Extract style properties or use defaults
   const {
-    fillAlpha = props.fillAlpha || 0.5,
-    fillAlphaInactive = props.fillAlphaInactive || 0.2,
-    outlineWidth = props.outlineWidth || 1,
+    fillAlpha = props.fillAlpha ?? 0.5,
+    fillAlphaInactive = props.fillAlphaInactive ?? 0.2,
+    outlineWidth = props.outlineWidth ?? 1,
     renderFill = props.renderFill !== undefined ? props.renderFill : true,
     renderOutline = props.renderOutline !== undefined ? props.renderOutline : true,
-  } = activeRepresentation?.styles ?? {};
+  } = (props.appearanceScope === 'segment'
+    ? props.appearanceStyle
+    : activeRepresentation?.styles) ?? {};
 
   // Check if SegmentationTableConfig is present in children
   const hasConfigComponent = Children.toArray(children).some(
@@ -107,20 +109,29 @@ export const SegmentationTableRoot = (props: SegmentationTableProps) => {
       }}
     >
       <PanelSection defaultOpen={true}>
-        <PanelSection.Header className="flex items-center justify-between">
-          <span>{t(title)}</span>
+        <div className="relative">
+          <PanelSection.Header className="flex items-center justify-between">
+            <span>{t(title)}</span>
+          </PanelSection.Header>
           {hasConfigComponent && (
-            <div className="ml-auto mr-2">
-              <Icons.Settings
-                className="text-primary h-4 w-4"
+            <div className="absolute right-7 top-0.5 flex h-7 items-center">
+              <button
+                type="button"
+                aria-label={t('Mask appearance settings')}
+                aria-expanded={showConfig}
                 onClick={e => {
                   e.stopPropagation();
                   toggleShowConfig();
                 }}
-              />
+              >
+                <Icons.Settings
+                  className="text-primary h-4 w-4"
+                  aria-hidden="true"
+                />
+              </button>
             </div>
           )}
-        </PanelSection.Header>
+        </div>
         <PanelSection.Content>{processedChildren}</PanelSection.Content>
       </PanelSection>
     </SegmentationTableProvider>

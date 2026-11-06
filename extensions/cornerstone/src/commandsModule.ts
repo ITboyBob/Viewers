@@ -8,6 +8,7 @@ import {
   Types as CoreTypes,
   BaseVolumeViewport,
   getRenderingEngines,
+  eventTarget,
 } from '@cornerstonejs/core';
 import {
   ToolGroupManager,
@@ -43,6 +44,8 @@ import { getUpdatedViewportsForSegmentation } from './utils/hydrationUtils';
 import { SegmentationRepresentations } from '@cornerstonejs/tools/enums';
 import createMaskCommands from './utils/maskEditing/createMaskCommands';
 import createVolumeMaskCommands from './utils/maskEditing/createVolumeMaskCommands';
+import { assertMaskHistoryTarget } from './utils/maskEditing/maskHistory';
+import { MASK_BRUSH_SIZE_EVENT } from './utils/maskEditing/maskOperationEvents';
 import {
   getCircleTool,
   isSphereTool,
@@ -1538,16 +1541,27 @@ function commandsModule({
 
       const viewport = viewports.get(targetViewportId);
 
+      if (!viewport?.displaySetInstanceUIDs?.length) return false;
+
       // Todo: add support for multiple display sets
       const displaySetInstanceUID =
         options.displaySetInstanceUID || viewport.displaySetInstanceUIDs[0];
 
       const segs = segmentationService.getSegmentations();
 
-      const label = options.label || `Segmentation ${segs.length + 1}`;
+      const label = options.label || `${i18n.t('Common:Segmentation')} ${segs.length + 1}`;
       const segmentationId = options.segmentationId || `${csUtils.uuidv4()}`;
 
       const displaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
+
+      if (!displaySet?.imageIds?.length) {
+        uiNotificationService.show({
+          title: '影像正在加载',
+          message: '切片引用尚未初始化，请等待影像加载完成后再新建 Mask。',
+          type: 'info',
+        });
+        return false;
+      }
 
       // This will create the segmentation and register it as a display set
       const generatedSegmentationId = await segmentationService.createLabelmapForDisplaySet(
@@ -1558,7 +1572,7 @@ function commandsModule({
           segments: options.createInitialSegment
             ? {
                 1: {
-                  label: `${i18n.t('Segment')} 1`,
+                  label: `${i18n.t('Common:Segment')} 1`,
                   active: true,
                 },
               }
@@ -1580,6 +1594,7 @@ function commandsModule({
         segmentationId,
         type: Enums.SegmentationRepresentations.Labelmap,
       });
+      segmentationService.setActiveSegmentation(viewportId, segmentationId);
 
       return generatedSegmentationId;
     },
@@ -1610,7 +1625,11 @@ function commandsModule({
      * @param props.segmentationId - The ID of the segmentation
      * @param props.segmentIndex - The index of the segment to activate
      */
-    setActiveSegmentAndCenterCommand: ({ segmentationId, segmentIndex }) => {
+    setActiveSegmentAndCenterCommand: ({
+      segmentationId,
+      segmentIndex,
+      highlightSegment = true,
+    }) => {
       const { segmentationService, viewportGridService } = servicesManager.services;
       // set both active segmentation and active segment
       segmentationService.setActiveSegmentation(
@@ -1618,7 +1637,13 @@ function commandsModule({
         segmentationId
       );
       segmentationService.setActiveSegment(segmentationId, segmentIndex);
-      segmentationService.jumpToSegmentCenter(segmentationId, segmentIndex);
+      segmentationService.jumpToSegmentCenter(
+        segmentationId,
+        segmentIndex,
+        undefined,
+        0.9,
+        highlightSegment
+      );
     },
 
     /**
@@ -1627,8 +1652,26 @@ function commandsModule({
      * @param props.segmentIndex - The index of the segment
      * @param props.type - The type of visibility to toggle
      */
-    toggleSegmentVisibilityCommand: ({ segmentationId, segmentIndex, type }) => {
+    toggleSegmentVisibilityCommand: ({
+      segmentationId,
+      segmentIndex,
+      type,
+      allViewports = false,
+    }) => {
       const { segmentationService, viewportGridService } = servicesManager.services;
+      if (allViewports) {
+        const visible = cornerstoneTools.segmentation.config.visibility.getSegmentIndexVisibility(
+          viewportGridService.getActiveViewportId(),
+          { segmentationId, type },
+          segmentIndex
+        );
+        segmentationService.setSegmentVisibilityForAllViewports(
+          segmentationId,
+          segmentIndex,
+          !visible
+        );
+        return;
+      }
       segmentationService.toggleSegmentVisibility(
         viewportGridService.getActiveViewportId(),
         segmentationId,
@@ -1652,8 +1695,17 @@ function commandsModule({
      * @param props.segmentationId - The ID of the segmentation
      * @param props.type - The type of representation
      */
-    toggleSegmentationVisibilityCommand: ({ segmentationId, type }) => {
+    toggleSegmentationVisibilityCommand: ({ segmentationId, type, allViewports = false }) => {
       const { segmentationService, viewportGridService } = servicesManager.services;
+      if (allViewports) {
+        const visible =
+          cornerstoneTools.segmentation.config.visibility.getSegmentationRepresentationVisibility(
+            viewportGridService.getActiveViewportId(),
+            { segmentationId, type }
+          );
+        segmentationService.setCollectionVisibilityForAllViewports(segmentationId, !visible);
+        return;
+      }
       segmentationService.toggleSegmentationRepresentationVisibility(
         viewportGridService.getActiveViewportId(),
         { segmentationId, type }
@@ -1665,8 +1717,7 @@ function commandsModule({
      * @param props.segmentationId - The ID of the segmentation to download
      */
     downloadSegmentationCommand: ({ segmentationId }) => {
-      const { segmentationService } = servicesManager.services;
-      segmentationService.downloadSegmentation(segmentationId);
+      return actions.exportMaskSegmentation({ segmentationId });
     },
 
     /**
@@ -1713,6 +1764,42 @@ function commandsModule({
     setSegmentationStyleCommand: ({ type, key, value }) => {
       const { segmentationService } = servicesManager.services;
       segmentationService.setStyle({ type }, { [key]: value });
+    },
+    setMaskAppearance: ({ segmentationId, segmentIndex, style }) => {
+      const { segmentationService } = servicesManager.services;
+      const target = segmentationService.getSegmentation(segmentationId)?.segments[segmentIndex];
+      if (!target || !Number.isInteger(segmentIndex) || segmentIndex < 1) return;
+      const patch = {};
+      const keys: Record<string, { inactive: string; min?: number; max?: number }> = {
+        fillAlpha: { inactive: 'fillAlphaInactive', min: 0, max: 1 },
+        outlineWidth: { inactive: 'outlineWidthInactive', min: 0, max: 10 },
+        renderFill: { inactive: 'renderFillInactive' },
+        renderOutline: { inactive: 'renderOutlineInactive' },
+      };
+      for (const [key, value] of Object.entries(style)) {
+        const rule = keys[key];
+        if (
+          !rule ||
+          (rule.min === undefined
+            ? typeof value !== 'boolean'
+            : typeof value !== 'number' ||
+              !Number.isFinite(value) ||
+              value < rule.min ||
+              value > rule.max)
+        )
+          return;
+        patch[key] = value;
+        patch[rule.inactive] = value;
+      }
+      const specifier = {
+        type: Enums.SegmentationRepresentations.Labelmap,
+        segmentationId,
+        segmentIndex,
+      };
+      segmentationService.setStyle(specifier, patch);
+      segmentationService.getViewportIdsWithSegmentation(segmentationId).forEach(viewportId => {
+        segmentationService.setStyle({ ...specifier, viewportId }, patch);
+      });
     },
 
     /**
@@ -1846,7 +1933,7 @@ function commandsModule({
       });
     },
 
-    editSegmentColor: ({ segmentationId, segmentIndex }) => {
+    editSegmentColor: ({ segmentationId, segmentIndex, allViewports = false }) => {
       const { segmentationService, uiDialogService, viewportGridService } =
         servicesManager.services;
       const viewportId = viewportGridService.getActiveViewportId();
@@ -1866,7 +1953,15 @@ function commandsModule({
           value: rgbaColor,
           onSave: newRgbaColor => {
             const color = [newRgbaColor.r, newRgbaColor.g, newRgbaColor.b, newRgbaColor.a * 255.0];
-            segmentationService.setSegmentColor(viewportId, segmentationId, segmentIndex, color);
+            if (allViewports) {
+              segmentationService.setSegmentColorForAllViewports(
+                segmentationId,
+                segmentIndex,
+                color
+              );
+            } else {
+              segmentationService.setSegmentColor(viewportId, segmentationId, segmentIndex, color);
+            }
           },
         },
       });
@@ -1902,10 +1997,24 @@ function commandsModule({
       viewportGridService.setDisplaySetsForViewports(viewportsToUpdate);
     },
     undo: () => {
-      DefaultHistoryMemo.undo();
+      try {
+        assertMaskHistoryTarget();
+        DefaultHistoryMemo.undo();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '无法撤销当前编辑。';
+        uiNotificationService.show({ title: '编辑历史', message, type: 'error' });
+        return { changed: 0, error: true, message };
+      }
     },
     redo: () => {
-      DefaultHistoryMemo.redo();
+      try {
+        assertMaskHistoryTarget(true);
+        DefaultHistoryMemo.redo();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '无法重做当前编辑。';
+        uiNotificationService.show({ title: '编辑历史', message, type: 'error' });
+        return { changed: 0, error: true, message };
+      }
     },
     toggleSegmentPreviewEdit: ({ toggle }) => {
       let labelmapTools = getLabelmapTools({ toolGroupService });
@@ -2069,10 +2178,17 @@ function commandsModule({
         segmentAI.initViewport(viewport);
       }
     },
-    setBrushSize: ({ value, toolNames }) => {
+    setBrushSize: ({
+      value,
+      toolNames = [],
+      toolGroupIds = toolGroupService.getToolGroupIds(),
+    }) => {
       const brushSize = Number(value);
+      if (!Number.isFinite(brushSize) || brushSize < 0.5 || brushSize > 99.5) {
+        throw new Error('笔刷半径应为 0.5 至 99.5 mm。');
+      }
 
-      toolGroupService.getToolGroupIds()?.forEach(toolGroupId => {
+      toolGroupIds?.forEach(toolGroupId => {
         if (toolNames?.length === 0) {
           segmentationUtils.setBrushSizeForToolGroup(toolGroupId, brushSize);
         } else {
@@ -2080,6 +2196,11 @@ function commandsModule({
             segmentationUtils.setBrushSizeForToolGroup(toolGroupId, brushSize, toolName);
           });
         }
+        eventTarget.dispatchEvent(
+          new CustomEvent(MASK_BRUSH_SIZE_EVENT, {
+            detail: { value: brushSize, toolNames, toolGroupId },
+          })
+        );
       });
     },
     setThresholdRange: ({
@@ -2091,6 +2212,14 @@ function commandsModule({
         'ThresholdSphereBrushDynamic',
       ],
     }) => {
+      if (
+        !Array.isArray(value) ||
+        value.length !== 2 ||
+        !value.every(Number.isFinite) ||
+        value[0] > value[1]
+      ) {
+        throw new Error('阈值下限不能大于上限，且必须是有效数字。');
+      }
       const toolGroupIds = toolGroupService.getToolGroupIds();
       if (!toolGroupIds?.length) {
         return;
@@ -2114,8 +2243,16 @@ function commandsModule({
       }
 
       for (const toolGroupId of toolGroupIds) {
-        const brushSize = segmentationUtils.getBrushSizeForToolGroup(toolGroupId);
-        segmentationUtils.setBrushSizeForToolGroup(toolGroupId, brushSize + 3);
+        const group = toolGroupService.getToolGroup(toolGroupId);
+        const activeName = group?.getActivePrimaryMouseButtonTool();
+        const brushSize =
+          group?.getToolConfiguration(activeName)?.brushSize ??
+          segmentationUtils.getBrushSizeForToolGroup(toolGroupId);
+        if (Number.isFinite(brushSize))
+          actions.setBrushSize({
+            value: Math.min(99.5, Math.max(0.5, brushSize + 3)),
+            toolGroupIds: [toolGroupId],
+          });
       }
     },
     decreaseBrushSize: () => {
@@ -2125,8 +2262,16 @@ function commandsModule({
       }
 
       for (const toolGroupId of toolGroupIds) {
-        const brushSize = segmentationUtils.getBrushSizeForToolGroup(toolGroupId);
-        segmentationUtils.setBrushSizeForToolGroup(toolGroupId, brushSize - 3);
+        const group = toolGroupService.getToolGroup(toolGroupId);
+        const activeName = group?.getActivePrimaryMouseButtonTool();
+        const brushSize =
+          group?.getToolConfiguration(activeName)?.brushSize ??
+          segmentationUtils.getBrushSizeForToolGroup(toolGroupId);
+        if (Number.isFinite(brushSize))
+          actions.setBrushSize({
+            value: Math.max(0.5, Math.min(99.5, brushSize - 3)),
+            toolGroupIds: [toolGroupId],
+          });
       }
     },
     addNewSegment: () => {
@@ -2574,6 +2719,7 @@ function commandsModule({
       commandFn: actions.deleteActiveAnnotation,
     },
     setDisplaySetsForViewports: actions.setDisplaySetsForViewports,
+    setMaskAppearance: actions.setMaskAppearance,
     undo: actions.undo,
     redo: actions.redo,
     interpolateLabelmap: actions.interpolateLabelmap,
@@ -2591,11 +2737,32 @@ function commandsModule({
     thresholdMaskSlice: actions.thresholdMaskSlice,
     thresholdMaskSeries: actions.thresholdMaskSeries,
     growMaskFromSeed: actions.growMaskFromSeed,
+    previewMaskRefinement: actions.previewMaskRefinement,
+    applyMaskRefinement: actions.applyMaskRefinement,
+    getMaskRefinementPreviewData: actions.getMaskRefinementPreviewData,
+    discardMaskRefinementPreview: actions.discardMaskRefinementPreview,
+    cancelMaskRefinementCalculation: actions.cancelMaskRefinementCalculation,
+    isolateCurrentMask: actions.isolateCurrentMask,
+    restoreMaskVisibility: actions.restoreMaskVisibility,
+    hasMaskVisibilitySnapshot: actions.hasMaskVisibilitySnapshot,
+    getMaskRefinementSliceContext: actions.getMaskRefinementSliceContext,
+    getMaskInterpolationKeyframes: actions.getMaskInterpolationKeyframes,
+    configureMaskHuGrow: actions.configureMaskHuGrow,
+    previewMaskHuGrowFromSeed: actions.previewMaskHuGrowFromSeed,
+    cloneCurrentMask: actions.cloneCurrentMask,
+    saveMaskWorkspace: actions.saveMaskWorkspace,
+    loadMaskWorkspace: actions.loadMaskWorkspace,
     analyzeMaskSplit: actions.analyzeMaskSplit,
     applyMaskSplit: actions.applyMaskSplit,
     locateMaskSplitRegion: actions.locateMaskSplitRegion,
     discardMaskSplitPreview: actions.discardMaskSplitPreview,
     fillMaskHoles: actions.fillMaskHoles,
+    fillMaskHolesSeries: actions.fillMaskHolesSeries,
+    exportMaskSegmentation: actions.exportMaskSegmentation,
+    saveMaskProject: actions.saveMaskProject,
+    loadMaskProject: actions.loadMaskProject,
+    backupMaskProject: actions.backupMaskProject,
+    restoreMaskDraft: actions.restoreMaskDraft,
     splitMaskComponents: actions.splitMaskComponents,
     setThresholdRange: actions.setThresholdRange,
     increaseBrushSize: actions.increaseBrushSize,
@@ -2615,6 +2782,7 @@ function commandsModule({
 
   for (const [name, definition] of Object.entries(definitions as Record<string, any>)) {
     if (
+      name === 'applyMaskRefinement' ||
       /^(addSegment|addNewSegment|createLabelmap|create.*Segmentation|delete|removeMeasurement|editSegment|editSegmentation|editMeasurement|setSegmentLabel|setSegmentColor|runSegmentBidirectional|apply.*Threshold|thresholdMask|fillMask|growMask|splitMask|undoMask|redoMask)/i.test(
         name
       )

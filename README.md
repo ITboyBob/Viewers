@@ -12,6 +12,14 @@
 - [6. 如何接手服务器同步改造](#6-如何接手服务器同步改造)
 - [7. 上游项目与许可证](#7-上游项目与许可证)
 
+## 源分支掩膜工具参考
+
+本次同步引入源分支的掩膜工作台、项目文件、三维精修、空腔填充和多关键层插值能力。
+使用说明见 [掩膜演示说明](MASK_DEMO_README.md)、[项目工作流](PROJECT_WORKFLOW_NOTES.md)、
+[三维精修](MASK_REFINEMENT_NOTES.md)、[三维填洞](CAVITY_FILL_NOTES.md) 和 [多关键层插值](INTERPOLATION_NOTES.md)。
+源分支的 [后端需求草案](BACKEND_API_REQUIREMENTS.md) 与 [OpenAPI 草案](docs/mask-backend.openapi.yaml)
+仅作来源参考，不替代下文的本项目业务接口与实现状态说明。
+
 ## 1. 项目简介与代码导航
 
 当前业务入口围绕账号、团队、任务、本地 DICOM 导入及标注工作台展开；OHIF 继续承担影像显示与原生测量、分割等交互。本地 DICOM 启动配置不依赖 PACS，但业务功能需要同时启动本仓库后端。

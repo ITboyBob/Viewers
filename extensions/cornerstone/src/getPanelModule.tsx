@@ -37,25 +37,38 @@ const getPanelModule = ({ commandsManager, servicesManager, extensionManager }: 
     const { toolbarService } = servicesManager.services;
 
     return (
-      <>
-        <Toolbox
-          buttonSectionId={toolbarService.sections.segmentationToolbox}
-          title="Segmentation Tools"
-        />
+      <div className="mask-workbench-panel">
         <MaskEditingTools />
-        <PanelSegmentation
-          commandsManager={commandsManager}
-          servicesManager={servicesManager}
-          extensionManager={extensionManager}
-          configuration={{
-            ...configuration,
-          }}
-        />
-      </>
+        <details className="mask-advanced-tools">
+          <summary>高级工具 · OHIF</summary>
+          <Toolbox
+            buttonSectionId={toolbarService.sections.segmentationToolbox}
+            title="Segmentation Tools"
+          />
+        </details>
+      </div>
     );
   };
 
   return [
+    {
+      name: 'panelMaskManager',
+      iconName: 'tab-segmentation',
+      iconLabel: 'Masks',
+      label: 'Mask 列表',
+      component: () => (
+        <div className="mask-manager">
+          <div className="mask-manager-intro">
+            <strong>项目 · Masks</strong>
+            <p>在这里选择、命名、显隐或锁定 Mask，再到右侧进行分割编辑。</p>
+          </div>
+          <PanelSegmentation
+            title="Masks · 蒙版列表"
+            allViewports
+          />
+        </div>
+      ),
+    },
     {
       name: 'activeViewportWindowLevel',
       component: () => {
@@ -86,8 +99,8 @@ const getPanelModule = ({ commandsManager, servicesManager, extensionManager }: 
     {
       name: 'panelSegmentationWithTools',
       iconName: 'tab-segmentation',
-      iconLabel: 'Segmentation',
-      label: 'Segmentation',
+      iconLabel: '分割',
+      label: '分割工作台',
       component: wrappedPanelSegmentationWithTools,
     },
   ];

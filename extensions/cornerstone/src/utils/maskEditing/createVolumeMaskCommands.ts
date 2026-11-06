@@ -3,14 +3,28 @@ import {
   VolumeViewport,
   cache,
   imageLoader,
+  metaData,
   utilities,
   Types,
 } from '@cornerstonejs/core';
 import { segmentation, utilities as toolUtilities } from '@cornerstonejs/tools';
-import { thresholdSlice } from './maskAlgorithms';
+import { thresholdSlice, fillHolesSlice } from './maskAlgorithms';
 import { markSeedComponent, analyzeMaskComponents } from './volumeAlgorithms';
 import { reportMaskOperation } from './maskOperationEvents';
 import type { MaskSplitPreview, VolumeSplitAnalysis } from './splitMaskTypes';
+import createMaskProjectCommands from './createMaskProjectCommands';
+import createMaskRefinementCommands from './createMaskRefinementCommands';
+import createMaskVisibilityCommands from './createMaskVisibilityCommands';
+import {
+  validateRoiInstance,
+  roiSelectionForInstance,
+  roiSelection,
+  roiContains,
+  maskRoiSettings,
+} from './maskRoi';
+import type { MaskRoi } from './maskRoi';
+import { describeHistoryMemo } from './maskHistory';
+import type { MaskHistoryDetail } from './maskHistory';
 
 type VoxelManager = Types.IVoxelManager<number>;
 type LabelmapData = { volumeId?: string; imageIds?: string[]; referencedImageIds?: string[] };
@@ -176,15 +190,29 @@ export default function createVolumeMaskCommands({
   type LabelmapMemo = ReturnType<
     typeof toolUtilities.segmentation.LabelmapMemo.createLabelmapMemo<number>
   >;
-  function saveHistory(segmentationId: string, memos: LabelmapMemo[]) {
+  function saveHistory(
+    segmentationId: string,
+    memos: LabelmapMemo[],
+    detail?: Partial<MaskHistoryDetail>
+  ) {
     if (!memos.length) return;
-    utilities.HistoryMemo.DefaultHistoryMemo.push({
+    const current = segmentationService.getSegmentation(segmentationId);
+    const segment = segmentationService.getActiveSegment(viewportGridService.getActiveViewportId());
+    const memo = {
       id: utilities.uuidv4(),
       operationType: 'labelmap',
       restoreMemo(isUndo = true) {
         (isUndo ? [...memos].reverse() : memos).forEach(memo => memo.restoreMemo(isUndo));
       },
+    };
+    describeHistoryMemo(memo, {
+      title: '整组 Mask 编辑',
+      segmentationId,
+      segmentIndex: segment?.segmentIndex,
+      target: `${current?.label || '标注集'} / ${segment?.label || current?.segments[segment?.segmentIndex]?.label || 'Mask'}`,
+      ...detail,
     });
+    utilities.HistoryMemo.DefaultHistoryMemo.push(memo);
     segmentation.triggerSegmentationEvents.triggerSegmentationDataModified(segmentationId);
   }
 
@@ -210,12 +238,17 @@ export default function createVolumeMaskCommands({
     });
   }
 
-  async function thresholdSeries({ lower, upper, replace = true }) {
+  async function thresholdSeries({ lower, upper, replace = true, roi = undefined as MaskRoi }) {
     if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower > upper) {
       throw new Error('阈值下限不能大于上限，且必须是有效数字。');
     }
     const target = targetFor();
     const frames = frameData(target);
+    // Validate every ROI/source pair before the first write, including unloaded slices.
+    if (roi)
+      frames.forEach(frame =>
+        validateRoiInstance(roi, metaData.get('instance', frame.referenceId))
+      );
     const loaded = new Array<Types.IImage>(frames.length);
     let next = 0;
     let completed = 0;
@@ -263,7 +296,10 @@ export default function createVolumeMaskCommands({
           target.segmentIndex,
           lower,
           upper,
-          replace
+          replace,
+          roi
+            ? roiSelectionForInstance(roi, metaData.get('instance', frame.referenceId))
+            : undefined
         );
         const memo = toolUtilities.segmentation.LabelmapMemo.createLabelmapMemo(
           target.segmentationId,
@@ -283,11 +319,68 @@ export default function createVolumeMaskCommands({
       ensureTarget(target);
       saveHistory(
         target.segmentationId,
-        memos.filter(memo => memo.commitMemo())
+        memos.filter(memo => memo.commitMemo()),
+        {
+          title: '整组阈值',
+          changed,
+          parameters: {
+            '下限 HU': lower,
+            '上限 HU': upper,
+            模式: replace ? '替换' : '追加',
+            范围: roi ? 'ROI' : '整组',
+          },
+        }
       );
       return {
         changed,
         message: `整组 ${frames.length} 张切片阈值选区完成，更新 ${changed} 个像素。`,
+      };
+    } catch (error) {
+      rollback(target.segmentationId, memos);
+      throw error;
+    }
+  }
+
+  async function fillSeries() {
+    const target = targetFor();
+    const frames = frameData(target);
+    const memos: LabelmapMemo[] = [];
+    let changed = 0;
+    try {
+      for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+        ensureTarget(target);
+        const frame = frames[frameIndex];
+        const labels = frame.voxelManager.getScalarData();
+        const filled = fillHolesSlice(
+          labels,
+          frame.image.columns,
+          frame.image.rows,
+          target.segmentIndex
+        );
+        const memo = toolUtilities.segmentation.LabelmapMemo.createLabelmapMemo(
+          target.segmentationId,
+          frame.voxelManager
+        );
+        memos.push(memo);
+        for (let index = 0; index < filled.length; index++) {
+          if (labels[index] !== filled[index]) {
+            memo.voxelManager.setAtIndex(index, filled[index]);
+            changed++;
+          }
+        }
+        memo.commitMemo();
+        reportMaskOperation('progress', `正在逐片填洞 ${frameIndex + 1}/${frames.length}…`);
+        if (frameIndex % 4 === 3) await pause();
+      }
+      ensureTarget(target);
+      saveHistory(
+        target.segmentationId,
+        memos.filter(memo => memo.commitMemo()),
+        { title: '整组逐片填洞', changed }
+      );
+      return {
+        changed,
+        message: `整组 ${frames.length} 张切片逐片填洞完成，填充 ${changed} 个像素。`,
       };
     } catch (error) {
       rollback(target.segmentationId, memos);
@@ -334,17 +427,23 @@ export default function createVolumeMaskCommands({
 
   async function packMask(
     target: ReturnType<typeof targetFor>,
-    volume: ReturnType<typeof maskVolumeFor>
+    volume: ReturnType<typeof maskVolumeFor>,
+    selection?: Uint8Array
   ) {
     const { dimensions, voxelManager } = volume;
     const count = dimensions[0] * dimensions[1] * dimensions[2];
     const binary = new Uint8Array(count);
     const plane = dimensions[0] * dimensions[1];
+    let yieldAt = performance.now() + 20;
     for (let index = 0; index < count; index++) {
-      binary[index] = voxelManager.getAtIndex(index) === target.segmentIndex ? 1 : 0;
-      if (index > 0 && index % (plane * 16) === 0) {
+      binary[index] =
+        (!selection || selection[index]) && voxelManager.getAtIndex(index) === target.segmentIndex
+          ? 1
+          : 0;
+      if (index > 0 && index % plane === 0 && performance.now() >= yieldAt) {
         ensureTarget(target);
         await pause();
+        yieldAt = performance.now() + 20;
       }
     }
     return binary;
@@ -353,16 +452,44 @@ export default function createVolumeMaskCommands({
   async function growFromSeed({
     worldPoint,
     viewportId,
+    roi,
   }: {
     worldPoint: Types.Point3;
     viewportId?: string;
+    roi?: MaskRoi;
   }) {
     const target = targetFor(viewportId);
     const volume = maskVolumeFor(target);
     const { dimensions, voxelManager } = volume;
+    const displaySetId = viewportGridService.getDisplaySetsUIDsForViewport(target.viewportId)?.[0];
+    const firstImageId =
+      displaySetId && displaySetService.getDisplaySetByUID(displaySetId)?.imageIds?.[0];
+    const series = firstImageId && metaData.get('instance', firstImageId)?.SeriesInstanceUID;
+    roi ||= series && maskRoiSettings.get(series);
+    let selection: Uint8Array;
+    if (roi) {
+      if (roi.seriesInstanceUID !== series) throw new Error('ROI 与当前影像序列不匹配。');
+      if (!roiContains(roi, worldPoint)) throw new Error('请在 ROI 内点选要保留的目标。');
+      const plane = dimensions[0] * dimensions[1];
+      selection = new Uint8Array(plane * dimensions[2]);
+      for (let z = 0; z < dimensions[2]; z++) {
+        const origin = utilities.transformIndexToWorld(volume.imageData, [0, 0, z]);
+        const dx = utilities
+          .transformIndexToWorld(volume.imageData, [1, 0, z])
+          .map((v, i) => v - origin[i]);
+        const dy = utilities
+          .transformIndexToWorld(volume.imageData, [0, 1, z])
+          .map((v, i) => v - origin[i]);
+        selection.set(roiSelection(roi, dimensions[0], dimensions[1], origin, dx, dy), z * plane);
+        if (z % 4 === 3) {
+          ensureTarget(target);
+          await pause();
+        }
+      }
+    }
     const seed = utilities.transformWorldToIndex(volume.imageData, worldPoint).map(Math.round);
     if (dimensions[2] === 1) seed[2] = 0;
-    const binary = await packMask(target, volume);
+    const binary = await packMask(target, volume, selection);
     const count = binary.length;
     const plane = dimensions[0] * dimensions[1];
     reportMaskOperation('progress', '正在计算种子点的三维连通区域…');
@@ -374,17 +501,28 @@ export default function createVolumeMaskCommands({
     );
     let changed = 0;
     try {
+      let yieldAt = performance.now() + 20;
       for (let index = 0; index < count; index++) {
-        if (mask[index] !== 2 && voxelManager.getAtIndex(index) === target.segmentIndex) {
+        if (
+          (!selection || selection[index]) &&
+          mask[index] !== 2 &&
+          voxelManager.getAtIndex(index) === target.segmentIndex
+        ) {
           memo.voxelManager.setAtIndex(index, 0);
           changed++;
         }
-        if (index > 0 && index % (plane * 16) === 0) {
+        if (index > 0 && index % plane === 0 && performance.now() >= yieldAt) {
           ensureTarget(target);
           await pause();
+          yieldAt = performance.now() + 20;
         }
       }
-      if (memo.commitMemo()) saveHistory(target.segmentationId, [memo]);
+      if (memo.commitMemo())
+        saveHistory(target.segmentationId, [memo], {
+          title: 'Mask 连通筛选',
+          changed,
+          parameters: { 范围: roi ? 'ROI' : '整组', 保留体素: kept },
+        });
       return {
         changed,
         message: `区域生长完成，保留 ${kept} 个连通像素，清除 ${changed} 个不连通像素。`,
@@ -446,15 +584,17 @@ export default function createVolumeMaskCommands({
     // Cornerstone 4.5 uses label 255 for temporary brush previews.
     used.add(255);
     const plane = volume.dimensions[0] * volume.dimensions[1];
+    let yieldAt = performance.now() + 20;
     for (let index = 0; index < analysis.mask.length; index++) {
       const label = volume.voxelManager.getAtIndex(index);
       used.add(label);
       if ((label === target.segmentIndex) !== (analysis.mask[index] !== 0)) {
         throw new Error('分析后 Mask 已发生修改，请重新分析后再拆分。');
       }
-      if (index > 0 && index % (plane * 16) === 0) {
+      if (index > 0 && index % plane === 0 && performance.now() >= yieldAt) {
         ensureTarget(target);
         await pause();
+        yieldAt = performance.now() + 20;
       }
     }
     const sourceLabel =
@@ -486,6 +626,7 @@ export default function createVolumeMaskCommands({
         segmentationService.addSegment(target.segmentationId, config);
       }
       segmentationService.setActiveSegment(target.segmentationId, target.segmentIndex);
+      yieldAt = performance.now() + 20;
       for (let index = 0; index < analysis.mask.length; index++) {
         const label = assignments.get(analysis.mask[index]);
         if (
@@ -496,9 +637,10 @@ export default function createVolumeMaskCommands({
           memo.voxelManager.setAtIndex(index, label);
           changed++;
         }
-        if (index > 0 && index % (plane * 16) === 0) {
+        if (index > 0 && index % plane === 0 && performance.now() >= yieldAt) {
           ensureTarget(target);
           await pause();
+          yieldAt = performance.now() + 20;
         }
       }
       ensureTarget(target);
@@ -526,7 +668,11 @@ export default function createVolumeMaskCommands({
           );
         segmentationService.setActiveSegment(target.segmentationId, target.segmentIndex);
       };
-      saveHistory(target.segmentationId, [memo]);
+      saveHistory(target.segmentationId, [memo], {
+        title: '整组三维拆分',
+        changed,
+        parameters: { 最小体素: plan.preview.minimumVoxels, 区域数: analysis.components.length },
+      });
       return {
         changed,
         applied: true,
@@ -569,8 +715,40 @@ export default function createVolumeMaskCommands({
   }
 
   return {
+    ...createMaskVisibilityCommands({ servicesManager }),
+    ...createMaskRefinementCommands({
+      servicesManager,
+      exclusive,
+      targetFor,
+      ensureTarget,
+      maskVolumeFor,
+      saveHistory,
+      rollback,
+      frameData,
+    }),
+    ...createMaskProjectCommands({ servicesManager, commandsManager }, exclusive),
+    exportMaskSegmentation: ({ segmentationId }: { segmentationId?: string } = {}) =>
+      exclusive('正在准备整个标注集的 DICOM SEG…', async () => {
+        const id =
+          segmentationId ||
+          segmentationService.getActiveSegmentation(viewportGridService.getActiveViewportId())
+            ?.segmentationId;
+        if (!id || !segmentationService.getSegmentation(id)?.representationData.Labelmap)
+          throw new Error('请先选择要导出的标注集。');
+        await commandsManager.run({
+          commandName: 'downloadSegmentation',
+          commandOptions: { segmentationId: id },
+          context: 'SEGMENTATION',
+        });
+        return {
+          changed: 0,
+          message:
+            '已生成整个标注集的 DICOM SEG，请查看浏览器下载；名称和颜色已包含，显隐与锁定不影响导出选区。',
+        };
+      }),
     thresholdMaskSeries: options =>
       exclusive('正在准备整组切片阈值选区…', () => thresholdSeries(options)),
+    fillMaskHolesSeries: () => exclusive('正在准备整组逐片填洞…', fillSeries),
     growMaskFromSeed: options => exclusive('正在准备区域生长…', () => growFromSeed(options)),
     analyzeMaskSplit: options => exclusive('正在准备三维拆分分析…', () => analyzeSplit(options)),
     applyMaskSplit: options => exclusive('正在应用整组三维拆分…', () => applySplit(options)),

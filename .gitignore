@@ -20,6 +20,8 @@ playwright-report/
 .yalc
 yalc.lock
 *.dcm
+*.ohifmask
+*.ohifproject
 # Logging, System files, misc.
 .idea/
 .npm

@@ -48,6 +48,8 @@ globalThis.__volumeMaskSdk = {
   },
   eventTarget: { dispatchEvent: () => true },
   utilities: {
+    transformWorldToIndex: (_, point) => point,
+    transformIndexToWorld: (_, point) => [point[0], point[1], point[2] * fixture.volume.spacing[2]],
     uuidv4: () => `whole-operation-${++nextIdentity}`,
     HistoryMemo: { DefaultHistoryMemo: { push: memo => history.push(memo) } },
   },
@@ -65,20 +67,39 @@ globalThis.__volumeMaskSdk = {
 };
 const hooks = registerHooks({
   resolve(specifier, context, next) {
+    if (specifier === './createMaskProjectCommands')
+      return { url: 'volume-mask:project-commands', shortCircuit: true };
+    if (specifier === './createMaskVisibilityCommands')
+      return { url: 'volume-mask:visibility-commands', shortCircuit: true };
     if (specifier === '@cornerstonejs/core') return { url: 'volume-mask:core', shortCircuit: true };
     if (specifier === '@cornerstonejs/tools')
       return { url: 'volume-mask:tools', shortCircuit: true };
-    if (['./maskAlgorithms', './volumeAlgorithms', './maskOperationEvents'].includes(specifier))
+    if (
+      [
+        './maskAlgorithms',
+        './volumeAlgorithms',
+        './maskOperationEvents',
+        './maskRoi',
+        './createMaskRefinementCommands',
+        './refinementAlgorithms',
+        './maskRefinementEvents',
+        './maskHistory',
+      ].includes(specifier)
+    )
       return next(`${specifier}.ts`, context);
     return next(specifier, context);
   },
   load(url, context, next) {
+    if (url === 'volume-mask:project-commands')
+      return { format: 'module', shortCircuit: true, source: 'export default () => ({})' };
+    if (url === 'volume-mask:visibility-commands')
+      return { format: 'module', shortCircuit: true, source: 'export default () => ({})' };
     if (url === 'volume-mask:core')
       return {
         format: 'module',
         shortCircuit: true,
         source:
-          'export const {StackViewport,VolumeViewport,cache,imageLoader,eventTarget,utilities}=globalThis.__volumeMaskSdk; export const Types={};',
+          'export const {StackViewport,VolumeViewport,cache,imageLoader,eventTarget,utilities}=globalThis.__volumeMaskSdk; export const metaData={get:(_,id)=>globalThis.__volumeMaskSdk.metadata?.(id)}; export const Types={};',
       };
     if (url === 'volume-mask:tools')
       return {
@@ -119,6 +140,7 @@ function setup(
     })
   );
   fixture = { pixels, active, locked: false, segmentIndex: 1 };
+  fixture.displaySet = { isReconstructable: true };
   fixture.volume = {
     dimensions: [2, 1, 2],
     spacing: [1, 1, 2],
@@ -156,7 +178,7 @@ function setup(
           getActiveViewportId: () => 'viewport',
           getDisplaySetsUIDsForViewport: () => ['case'],
         },
-        displaySetService: { getDisplaySetByUID: () => ({ isReconstructable: true }) },
+        displaySetService: { getDisplaySetByUID: () => fixture.displaySet },
         cornerstoneViewportService: { getCornerstoneViewport: () => new StackViewport() },
         segmentationService: {
           getActiveSegmentation: () => active,
@@ -492,4 +514,541 @@ test('an old preview token cannot discard or apply a newer analysis', async () =
   const second = await f.commands.analyzeMaskSplit({ minimumVoxels: 1 });
   await assert.rejects(f.commands.applyMaskSplit({ previewId: first.preview.id }), /失效/);
   assert.equal((await f.commands.applyMaskSplit({ previewId: second.preview.id })).applied, true);
+});
+
+test('whole-series filling applies each slice and restores all slices in one undo', async () => {
+  const ring = [1, 1, 1, 1, 0, 1, 1, 1, 1];
+  const f = setup([ring, ring]);
+  for (const id of ['label-0', 'label-1']) Object.assign(images.get(id), { columns: 3, rows: 3 });
+  assert.equal((await f.commands.fillMaskHolesSeries()).changed, 2);
+  assert.equal(f.pixels[0][4], 1);
+  assert.equal(f.pixels[1][4], 1);
+  assert.equal(history.length, 1);
+  history[0].restoreMemo(true);
+  assert.equal(f.pixels[0][4], 0);
+  assert.equal(f.pixels[1][4], 0);
+  history[0].restoreMemo(false);
+  assert.equal(f.pixels[0][4], 1);
+  assert.equal(f.pixels[1][4], 1);
+});
+
+test('whole-series filling preserves a different mask inside a closed boundary', async () => {
+  const f = setup([
+    [1, 1, 1, 1, 2, 1, 1, 1, 1],
+    [1, 1, 1, 1, 0, 1, 1, 1, 1],
+  ]);
+  for (const id of ['label-0', 'label-1']) Object.assign(images.get(id), { columns: 3, rows: 3 });
+  assert.equal((await f.commands.fillMaskHolesSeries()).changed, 1);
+  assert.equal(f.pixels[0][4], 2);
+});
+
+test('whole-series filling rolls back earlier slices if the mask becomes locked', async () => {
+  const ring = [1, 1, 1, 1, 0, 1, 1, 1, 1];
+  const f = setup([ring, ring]);
+  for (const id of ['label-0', 'label-1']) Object.assign(images.get(id), { columns: 3, rows: 3 });
+  f.onWrite = () => {
+    f.locked = true;
+  };
+  await assert.rejects(f.commands.fillMaskHolesSeries(), /锁定/);
+  assert.equal(f.pixels[0][4], 0);
+  assert.equal(f.pixels[1][4], 0);
+  assert.equal(history.length, 0);
+});
+
+test('reading keyframe layers is read-only and ignores other Mask pixels', async () => {
+  const f = setup([
+    [1, 0],
+    [2, 0],
+  ]);
+  assert.deepEqual((await f.commands.getMaskInterpolationKeyframes()).keyframes, [1]);
+  f.segmentIndex = 2;
+  assert.deepEqual((await f.commands.getMaskInterpolationKeyframes()).keyframes, [2]);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [2, 0],
+    ]
+  );
+  assert.equal(history.length, 0);
+});
+test('keyframe discovery rejects more than 64 layers without truncation or edits', async () => {
+  const f = setup(Array.from({ length: 65 }, () => [1, 0]));
+  f.volume.dimensions[2] = 65;
+  await assert.rejects(f.commands.getMaskInterpolationKeyframes(), /超过 64/);
+  assert.equal(history.length, 0);
+});
+test('multiple keyframe interpolation publishes statistics and applies as one undoable edit', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+    [1, 0],
+    [0, 0],
+    [1, 0],
+  ]);
+  f.volume.dimensions[2] = 5;
+  const original = f.pixels.map(v => [...v]);
+  const { preview } = await f.commands.previewMaskRefinement({
+    operation: 'interpolate',
+    keyframes: [1, 3, 5],
+  });
+  assert.deepEqual(preview.keyframes, [1, 3, 5]);
+  assert.equal(preview.interpolatedSlices, 2);
+  assert.equal(preview.skippedSlices, 0);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    original
+  );
+  await f.commands.applyMaskRefinement({ previewId: preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    Array.from({ length: 5 }, () => [1, 0])
+  );
+  assert.equal(history.length, 1);
+  history[0].restoreMemo(true);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    original
+  );
+});
+test('3D morphology preview is read-only and applying it protects other masks with one undo/redo', async () => {
+  const f = setup([
+    [1, 0],
+    [2, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+  assert.equal(preview.added, 1);
+  assert.equal(preview.removed, 0);
+  assert.equal(history.length, 0);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [2, 0],
+    ]
+  );
+  await f.commands.applyMaskRefinement({ previewId: preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 1],
+      [2, 0],
+    ]
+  );
+  assert.equal(history.length, 1);
+  history[0].restoreMemo(true);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [2, 0],
+    ]
+  );
+  history[0].restoreMemo(false);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 1],
+      [2, 0],
+    ]
+  );
+});
+test('mask changes invalidate the refinement result before any writes', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+  f.pixels[0][1] = 2;
+  await assert.rejects(f.commands.applyMaskRefinement({ previewId: preview.id }), /已发生修改/);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 2],
+      [0, 0],
+    ]
+  );
+  assert.equal(history.length, 0);
+});
+test('old refinement tokens cannot discard or apply a more recent preview', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const first = await f.commands.previewMaskRefinement({ operation: 'largest' });
+  const second = await f.commands.previewMaskRefinement({
+    operation: 'removeSmall',
+    minimumVolumeMm3: 3,
+  });
+  f.commands.discardMaskRefinementPreview({ previewId: first.preview.id });
+  await assert.rejects(f.commands.applyMaskRefinement({ previewId: first.preview.id }), /失效/);
+  assert.ok(f.commands.getMaskRefinementPreviewData({ previewId: second.preview.id }));
+  await f.commands.applyMaskRefinement({ previewId: second.preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [0, 0],
+      [0, 0],
+    ]
+  );
+});
+test('a no-op refinement does not add a history entry; locked masks reject previews', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({
+    operation: 'dilate',
+    radiusMm: 0.1,
+  });
+  assert.equal((await f.commands.applyMaskRefinement({ previewId: preview.id })).changed, 0);
+  assert.equal(history.length, 0);
+  f.locked = true;
+  await assert.rejects(f.commands.previewMaskRefinement({ operation: 'largest' }), /锁定/);
+});
+test('locking during refinement application rolls back all pixels', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 0],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 3 });
+  f.onWrite = () => {
+    f.locked = true;
+  };
+  await assert.rejects(f.commands.applyMaskRefinement({ previewId: preview.id }), /锁定/);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [0, 0],
+    ]
+  );
+  assert.equal(history.length, 0);
+});
+test('physical volume cleanup and seed deletion keep source masks unchanged until application', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({
+    operation: 'removeSeed',
+    worldPoint: [0, 0, 0],
+  });
+  assert.equal(preview.removed, 1);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [0, 1],
+    ]
+  );
+  await f.commands.applyMaskRefinement({ previewId: preview.id });
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [0, 0],
+      [0, 1],
+    ]
+  );
+});
+test('cancelling a calculation before publication leaves pixels and history unchanged', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const computation = f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+  assert.equal(f.commands.cancelMaskRefinementCalculation().cancelled, true);
+  const result = await computation;
+  assert.equal(result.cancelled, true);
+  assert.equal(result.preview, undefined);
+  assert.deepEqual(
+    f.pixels.map(v => [...v]),
+    [
+      [1, 0],
+      [0, 1],
+    ]
+  );
+  assert.equal(history.length, 0);
+  const next = await f.commands.previewMaskRefinement({ operation: 'largest' });
+  assert.ok(next.preview, 'cancellation must release batch exclusion');
+});
+test('worker progress is not a final result; cancellation terminates the worker and ignores late replies', async () => {
+  const previousWorker = global.Worker,
+    previousDispatch = globalThis.__volumeMaskSdk.eventTarget.dispatchEvent;
+  const events = [];
+  let worker;
+  globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = event => {
+    events.push(event);
+    return true;
+  };
+  global.Worker = class {
+    constructor() {
+      worker = this;
+    }
+    postMessage() {}
+    terminate() {
+      this.terminated = true;
+    }
+  };
+  try {
+    const f = setup([
+      [1, 0],
+      [0, 1],
+    ]);
+    const computation = f.commands.previewMaskRefinement({ operation: 'smooth', radiusMm: 1 });
+    const task = events.find(event => event.type === 'OHIF_MASK_REFINEMENT_TASK').detail;
+    const reply = worker.onmessage;
+    reply({ data: { type: 'progress', completed: 1, total: 4 } });
+    assert.ok(!worker.terminated);
+    assert.equal(
+      f.commands.cancelMaskRefinementCalculation({ taskId: 'stale-task' }).cancelled,
+      false
+    );
+    assert.equal(f.commands.cancelMaskRefinementCalculation({ taskId: task.id }).cancelled, true);
+    assert.ok(worker.terminated);
+    reply({ data: { mask: new Uint8Array(4).fill(1) } });
+    assert.equal((await computation).cancelled, true);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 1],
+      ]
+    );
+    assert.equal(history.length, 0);
+    assert.equal(
+      events.filter(event => event.type === 'OHIF_MASK_REFINEMENT_TASK').at(-1).detail.phase,
+      'cancelled'
+    );
+  } finally {
+    global.Worker = previousWorker;
+    globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = previousDispatch;
+  }
+});
+test('discarding during computation cancels it while an old preview token cannot cancel a newer task', async () => {
+  const f = setup([
+    [1, 0],
+    [0, 1],
+  ]);
+  const { preview } = await f.commands.previewMaskRefinement({ operation: 'largest' });
+  const previousWorker = global.Worker;
+  let worker;
+  global.Worker = class {
+    constructor() {
+      worker = this;
+    }
+    postMessage() {}
+    terminate() {
+      this.terminated = true;
+    }
+  };
+  try {
+    const computation = f.commands.previewMaskRefinement({ operation: 'smooth', radiusMm: 1 });
+    f.commands.discardMaskRefinementPreview({ previewId: preview.id });
+    assert.ok(!worker.terminated);
+    f.commands.discardMaskRefinementPreview();
+    assert.ok(worker.terminated);
+    assert.equal((await computation).cancelled, true);
+    assert.equal(history.length, 0);
+  } finally {
+    global.Worker = previousWorker;
+  }
+});
+test('worker failure terminates computation and allows another operation without partial edits', async () => {
+  const f = setup([
+      [1, 0],
+      [0, 1],
+    ]),
+    previousWorker = global.Worker;
+  let worker;
+  global.Worker = class {
+    constructor() {
+      worker = this;
+    }
+    postMessage() {}
+    terminate() {
+      this.terminated = true;
+    }
+  };
+  try {
+    const computation = f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+    worker.onerror({ preventDefault() {} });
+    await assert.rejects(computation, /计算失败/);
+    assert.ok(worker.terminated);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 1],
+      ]
+    );
+    assert.equal(history.length, 0);
+  } finally {
+    global.Worker = previousWorker;
+  }
+  assert.equal((await f.commands.thresholdMaskSeries({ lower: 1000, upper: 2000 })).changed, 2);
+});
+test('cancellation at final progress cannot publish a preview, and a published preview is no longer cancellable', async () => {
+  const f = setup([
+      [1, 0],
+      [0, 1],
+    ]),
+    previousDispatch = globalThis.__volumeMaskSdk.eventTarget.dispatchEvent;
+  let cancelAtCompletion = true,
+    publishedCancellation;
+  globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = event => {
+    if (
+      event.type === 'OHIF_MASK_REFINEMENT_TASK' &&
+      event.detail.phase === 'running' &&
+      event.detail.percent === 100 &&
+      cancelAtCompletion
+    ) {
+      cancelAtCompletion = false;
+      f.commands.cancelMaskRefinementCalculation({ taskId: event.detail.id });
+    }
+    if (event.type === 'OHIF_MASK_REFINEMENT_PREVIEW' && event.detail.preview)
+      publishedCancellation = f.commands.cancelMaskRefinementCalculation();
+    return true;
+  };
+  try {
+    const cancelled = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+    assert.equal(cancelled.cancelled, true);
+    assert.equal(cancelled.preview, undefined);
+    const completed = await f.commands.previewMaskRefinement({ operation: 'dilate', radiusMm: 1 });
+    assert.ok(completed.preview);
+    assert.equal(publishedCancellation.cancelled, false);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 1],
+      ]
+    );
+    assert.equal(history.length, 0);
+  } finally {
+    globalThis.__volumeMaskSdk.eventTarget.dispatchEvent = previousDispatch;
+  }
+});
+test('ROI morphology preserves outside labels and refuses an outdated ROI snapshot', async () => {
+  const {
+    maskRoiSettings,
+  } = require('../../extensions/cornerstone/src/utils/maskEditing/maskRoi.ts');
+  const f = setup([
+      [1, 0],
+      [0, 0],
+    ]),
+    roi = {
+      seriesInstanceUID: 'series',
+      axes: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      min: [0, 0, 0],
+      max: [1, 0, 0],
+    };
+  globalThis.__volumeMaskSdk.metadata = () => ({ SeriesInstanceUID: 'series' });
+  // Existing display set fixture only requires a source image identity for ROI resolution.
+  fixture.displaySet.imageIds = ['ref-0', 'ref-1'];
+  maskRoiSettings.set('series', roi);
+  try {
+    let { preview } = await f.commands.previewMaskRefinement({
+      operation: 'dilate',
+      radiusMm: 3,
+      useRoi: true,
+    });
+    assert.equal(preview.added, 1);
+    await f.commands.applyMaskRefinement({ previewId: preview.id });
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 1],
+        [0, 0],
+      ]
+    );
+    history[0].restoreMemo(true);
+    ({ preview } = await f.commands.previewMaskRefinement({
+      operation: 'dilate',
+      radiusMm: 3,
+      useRoi: true,
+    }));
+    maskRoiSettings.set('series', { ...roi, max: [0, 0, 0] });
+    await assert.rejects(f.commands.applyMaskRefinement({ previewId: preview.id }), /ROI 已改变/);
+    assert.deepEqual(
+      f.pixels.map(v => [...v]),
+      [
+        [1, 0],
+        [0, 0],
+      ]
+    );
+  } finally {
+    maskRoiSettings.clear();
+    delete globalThis.__volumeMaskSdk.metadata;
+  }
+});
+test('HU grow resolves source geometry and applies rescale exactly once for raw or pre-scaled pixels', async () => {
+  try {
+    for (const scaled of [false, true]) {
+      const f = setup(
+        [
+          [0, 0],
+          [0, 0],
+        ],
+        scaled
+          ? [
+              [100, -1000],
+              [100, -1000],
+            ]
+          : [
+              [1100, 0],
+              [1100, 0],
+            ]
+      );
+      fixture.displaySet.imageIds = ['ref-0', 'ref-1'];
+      fixture.volume.imageData.worldToIndex = point => [point[0], point[1], point[2] / 2];
+      globalThis.__volumeMaskSdk.metadata = id => ({
+        SeriesInstanceUID: 'series',
+        NumberOfFrames: 1,
+        Rows: 1,
+        Columns: 2,
+        ImagePositionPatient: [0, 0, id === 'ref-1' ? 2 : 0],
+        ImageOrientationPatient: [1, 0, 0, 0, 1, 0],
+        PixelSpacing: [1, 1],
+      });
+      for (const id of ['ref-0', 'ref-1'])
+        Object.assign(images.get(id), { isPreScaled: scaled, slope: 1, intercept: -1000 });
+      const { preview } = await f.commands.previewMaskRefinement({
+        operation: 'huGrow',
+        lower: 50,
+        upper: 150,
+        worldPoint: [0, 0, 0],
+      });
+      assert.equal(preview.added, 2);
+      assert.deepEqual(
+        f.pixels.map(v => [...v]),
+        [
+          [0, 0],
+          [0, 0],
+        ]
+      );
+      await f.commands.applyMaskRefinement({ previewId: preview.id });
+      assert.deepEqual(
+        f.pixels.map(v => [...v]),
+        [
+          [1, 0],
+          [1, 0],
+        ]
+      );
+      history[0].restoreMemo(true);
+      assert.deepEqual(
+        f.pixels.map(v => [...v]),
+        [
+          [0, 0],
+          [0, 0],
+        ]
+      );
+    }
+  } finally {
+    delete globalThis.__volumeMaskSdk.metadata;
+  }
 });

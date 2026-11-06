@@ -1,4 +1,15 @@
-import { VolumeViewport, StackViewport, cache, utilities, Types } from '@cornerstonejs/core';
+import {
+  VolumeViewport,
+  StackViewport,
+  cache,
+  utilities,
+  Types,
+  metaData,
+} from '@cornerstonejs/core';
+import { roiSelection } from './maskRoi';
+import type { MaskRoi } from './maskRoi';
+import { describeHistoryMemo } from './maskHistory';
+import type { MaskHistoryDetail } from './maskHistory';
 import { segmentation, utilities as toolUtilities } from '@cornerstonejs/tools';
 import {
   createSliceMapping,
@@ -46,6 +57,8 @@ export default function createMaskCommands({
     let mapping: ReturnType<typeof createSliceMapping>;
     let getIntensities: () => Float64Array;
     let maxSegmentIndex: number;
+    let indexToWorld: (index: number) => number[];
+    let seriesInstanceUID: string;
 
     if (viewport instanceof VolumeViewport) {
       const volume = labelmap.volumeId
@@ -61,6 +74,17 @@ export default function createMaskCommands({
       const axis = getAlignedPlaneAxis(volume.direction, camera.viewPlaneNormal);
       const point = utilities.transformWorldToIndex(volume.imageData, camera.focalPoint);
       mapping = createSliceMapping(volume.dimensions, axis, Math.round(point[axis]));
+      indexToWorld = index => {
+        const value = mapping.toIndex(index),
+          [w, h] = volume.dimensions;
+        return utilities.transformIndexToWorld(volume.imageData, [
+          value % w,
+          Math.floor(value / w) % h,
+          Math.floor(value / (w * h)),
+        ]);
+      };
+      const sourceId = cache.getVolume(viewport.getVolumeId())?.imageIds?.[0];
+      seriesInstanceUID = sourceId && metaData.get('instance', sourceId)?.SeriesInstanceUID;
       maxSegmentIndex = volume.dataType === 'Uint16Array' ? 65535 : 255;
       getIntensities = () => {
         const source = cache.getVolume(viewport.getVolumeId());
@@ -116,6 +140,13 @@ export default function createMaskCommands({
       }
       voxelManager = labelImage.voxelManager as VoxelManager;
       mapping = createSliceMapping([labelImage.columns, labelImage.rows, 1], 2, 0);
+      indexToWorld = index =>
+        utilities.transformIndexToWorld(viewport.getImageData().imageData, [
+          index % mapping.width,
+          Math.floor(index / mapping.width),
+          0,
+        ]);
+      seriesInstanceUID = metaData.get('instance', imageId)?.SeriesInstanceUID;
       maxSegmentIndex = labelImage.dataType === 'Uint16Array' ? 65535 : 255;
       getIntensities = () => {
         const image = cache.getImage(imageId);
@@ -159,13 +190,16 @@ export default function createMaskCommands({
       pixels,
       getIntensities,
       maxSegmentIndex,
+      indexToWorld,
+      seriesInstanceUID,
     };
   }
 
   function commit(
     slice: ReturnType<typeof getSlice>,
     result: Uint32Array,
-    created: CreatedSegment[] = []
+    created: CreatedSegment[] = [],
+    detail: Partial<MaskHistoryDetail> = {}
   ) {
     const { segmentationId, segmentIndex, voxelManager, mapping, pixels } = slice;
     let changed = 0;
@@ -207,6 +241,14 @@ export default function createMaskCommands({
         segmentationService.setActiveSegment(segmentationId, segmentIndex);
       };
     }
+    describeHistoryMemo(memo, {
+      title: '当前切片编辑',
+      segmentationId,
+      segmentIndex,
+      changed,
+      target: `${slice.active.label || '标注集'} / ${slice.segment.label || 'Mask'}`,
+      ...detail,
+    });
     utilities.HistoryMemo.DefaultHistoryMemo.push(memo);
     segmentationService.setActiveSegment(segmentationId, segmentIndex);
     segmentation.triggerSegmentationEvents.triggerSegmentationDataModified(segmentationId);
@@ -214,9 +256,22 @@ export default function createMaskCommands({
   }
 
   return {
-    thresholdMaskSlice: ({ lower, upper, replace = false }) => {
+    thresholdMaskSlice: ({ lower, upper, replace = false, roi = undefined as MaskRoi }) => {
       const slice = getSlice();
       const { pixels, mapping, segmentIndex } = slice;
+      let selection: Uint8Array;
+      if (roi) {
+        if (roi.seriesInstanceUID !== slice.seriesInstanceUID)
+          throw new Error('ROI 与当前序列不匹配。');
+        const origin = slice.indexToWorld(0);
+        const x =
+          mapping.width > 1 ? slice.indexToWorld(1).map((v, i) => v - origin[i]) : [0, 0, 0];
+        const y =
+          mapping.height > 1
+            ? slice.indexToWorld(mapping.width).map((v, i) => v - origin[i])
+            : [0, 0, 0];
+        selection = roiSelection(roi, mapping.width, mapping.height, origin, x, y);
+      }
       const result = thresholdSlice(
         pixels,
         slice.getIntensities(),
@@ -225,16 +280,25 @@ export default function createMaskCommands({
         segmentIndex,
         lower,
         upper,
-        replace
+        replace,
+        selection
       );
-      const changed = commit(slice, result);
+      const changed = commit(slice, result, [], {
+        title: '单片阈值',
+        parameters: {
+          '下限 HU': lower,
+          '上限 HU': upper,
+          模式: replace ? '替换' : '追加',
+          范围: roi ? 'ROI' : '当前切片',
+        },
+      });
       return { changed, message: `当前切片阈值选区完成，更新 ${changed} 个像素。` };
     },
     fillMaskHoles: () => {
       const slice = getSlice();
       const { pixels, mapping, segmentIndex } = slice;
       const result = fillHolesSlice(pixels, mapping.width, mapping.height, segmentIndex);
-      const changed = commit(slice, result);
+      const changed = commit(slice, result, [], { title: '单片填洞' });
       return {
         changed,
         message: changed
@@ -266,7 +330,10 @@ export default function createMaskCommands({
         segmentIndex: item.segmentIndex,
         label: `${slice.segment.label || 'Mask'} / ${index + 2}`,
       }));
-      const changed = commit(slice, result.pixels, created);
+      const changed = commit(slice, result.pixels, created, {
+        title: '单片拆分',
+        parameters: { 区域数: result.componentCount },
+      });
       return {
         changed,
         message: `当前切片已拆为 ${result.componentCount} 个 Mask，最大区域保留原名称。`,

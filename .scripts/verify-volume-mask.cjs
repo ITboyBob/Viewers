@@ -142,6 +142,7 @@ async function imagePoint(page, x, y) {
           );
         });
         const beforeGrow = await frameMasks(page);
+        await page.getByRole('tab', { name: '区域生长', exact: true }).click();
         await panel
           .getByRole('button', { name: 'Region Grow 区域生长 · 点选保留', exact: true })
           .click();
@@ -171,7 +172,8 @@ async function imagePoint(page, x, y) {
         await panel.getByRole('button', { name: '重做', exact: true }).click();
         assert.deepEqual(await frameMasks(page), grown);
 
-        await page.getByLabel('阈值下限').fill('700');
+        await page.getByRole('tab', { name: '阈值', exact: true }).click();
+        await page.getByLabel('阈值下限', { exact: true }).fill('700');
         await threshold.click();
         await expect(panel.getByRole('status')).toContainText('阈值选区完成');
         assert.ok((await frameMasks(page)).every(frame => !frame.counts[1]));
@@ -195,10 +197,11 @@ async function imagePoint(page, x, y) {
             )
             .toBe(true);
           await expect(threshold).toBeEnabled();
-          await page.getByLabel('阈值下限').fill('150');
+          await page.getByLabel('阈值下限', { exact: true }).fill('150');
           await threshold.click();
           await expect(panel.getByRole('status')).toContainText('整组 8 张切片阈值选区完成');
           assert.ok((await frameMasks(page)).every(frame => frame.counts[1] === 1679));
+          await page.getByRole('tab', { name: '区域生长', exact: true }).click();
           await panel
             .getByRole('button', { name: 'Region Grow 区域生长 · 点选保留', exact: true })
             .click();

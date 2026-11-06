@@ -33,6 +33,7 @@ async function create(page: Page, files: any) {
   });
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: '创建新任务', exact: true }).click();
+  await page.getByRole('menuitem', { name: '选择文件', exact: true }).click();
   const done = page.waitForResponse(
     r =>
       r.request().method() === 'POST' &&
@@ -293,6 +294,7 @@ test('原图与非空Mask自动保存后关闭A窗口，B从后端重开并恢�
         return group.getToolInstances().CircularBrush.mode;
       })
     ).toBe('Enabled');
+    await view.getByRole('tab', { name: '阈值', exact: true }).click();
     await expect(
       view.getByRole('button', { name: '应用阈值到整组切片', exact: true })
     ).toBeDisabled();

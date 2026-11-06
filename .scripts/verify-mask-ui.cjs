@@ -88,11 +88,10 @@ async function snapshot(page) {
     if (await confirm.isVisible()) await confirm.click();
     await page.locator('[data-cy="addSegmentation"]').click();
     await page.getByLabel('阈值处理范围').selectOption('slice');
-    await page.getByLabel('拆分处理范围').selectOption('slice');
     const thresholdButton = page.getByRole('button', { name: '应用阈值到当前切片', exact: true });
     await expect(thresholdButton).toBeEnabled({ timeout: 60000 });
-    await page.getByLabel('阈值下限').fill('150');
-    await page.getByLabel('阈值上限').fill('2000');
+    await page.getByLabel('阈值下限', { exact: true }).fill('150');
+    await page.getByLabel('阈值上限', { exact: true }).fill('2000');
     await thresholdButton.click();
     await expect(page.getByRole('status')).toContainText('阈值选区完成');
     const threshold = await snapshot(page);
@@ -102,6 +101,7 @@ async function snapshot(page) {
       threshold.wholeCounts[1],
       'Only the current plane is modified'
     );
+    await page.getByRole('tab', { name: '编辑', exact: true }).click();
     await page.getByRole('button', { name: 'Fill Holes 填洞（单片）', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('已填充');
     const filled = await snapshot(page);
@@ -110,6 +110,8 @@ async function snapshot(page) {
     assert.deepEqual((await snapshot(page)).values, threshold.values);
     await page.getByRole('button', { name: '重做', exact: true }).click();
     assert.deepEqual((await snapshot(page)).values, filled.values);
+    await page.getByRole('tab', { name: '拆分', exact: true }).click();
+    await page.getByLabel('拆分处理范围').selectOption('slice');
     await page.getByRole('button', { name: 'Split Mask 拆分（单片）', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('已拆为 2 个 Mask');
     const split = await snapshot(page);
@@ -157,6 +159,7 @@ async function snapshot(page) {
     await expect
       .poll(async () => (await snapshot(page)).counts[2], { timeout: 10000 })
       .toBeLessThan(split.counts[2]);
+    await page.getByRole('tab', { name: '拆分', exact: true }).click();
     await page.getByRole('button', { name: 'Split Mask 拆分（单片）', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('已拆为 2 个 Mask');
     const cut = await snapshot(page);

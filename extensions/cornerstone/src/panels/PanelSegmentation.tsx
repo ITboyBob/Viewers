@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import useTaskReadOnly from '../hooks/useTaskReadOnly';
 import useCanAddSegmentation from '../hooks/useCanAddSegmentation';
 import { SegmentationTable } from '@ohif/ui-next';
@@ -6,14 +6,89 @@ import { useActiveViewportSegmentationRepresentations } from '../hooks/useActive
 import { metaData, cache } from '@cornerstonejs/core';
 import { useSystem } from '@ohif/core/src';
 
-export default function PanelSegmentation({ children }: withAppTypes) {
+export default function PanelSegmentation({
+  children,
+  title = 'Segmentations',
+  allViewports = false,
+}: withAppTypes<{ children?: React.ReactNode; title?: string; allViewports?: boolean }>) {
   const { commandsManager, servicesManager } = useSystem();
   const readOnly = useTaskReadOnly();
   const canAddSegmentation = useCanAddSegmentation();
-  const { customizationService, displaySetService } = servicesManager.services;
+  const {
+    customizationService,
+    segmentationService,
+    displaySetService,
+    viewportGridService,
+    cornerstoneViewportService,
+  } = servicesManager.services;
 
-  const { segmentationsWithRepresentations, disabled } =
+  const { segmentationsWithRepresentations: representationRows, disabled } =
     useActiveViewportSegmentationRepresentations();
+  const activeViewportId = viewportGridService.getActiveViewportId();
+  const [readyViewportId, setReadyViewportId] = useState<string>();
+  useEffect(() => {
+    const update = () => {
+      const viewport = cornerstoneViewportService.getCornerstoneViewport(activeViewportId);
+      const displaySetId = viewportGridService.getDisplaySetsUIDsForViewport(activeViewportId)?.[0];
+      const displaySet = displaySetId && displaySetService.getDisplaySetByUID(displaySetId);
+      setReadyViewportId(displaySet?.imageIds?.length && viewport ? activeViewportId : undefined);
+    };
+    const subscription = cornerstoneViewportService.subscribe(
+      cornerstoneViewportService.EVENTS.VIEWPORT_DATA_CHANGED,
+      update
+    );
+    update();
+    return () => subscription.unsubscribe();
+  }, [activeViewportId, cornerstoneViewportService, displaySetService, viewportGridService]);
+  const currentViewport = cornerstoneViewportService.getCornerstoneViewport(
+    viewportGridService.getActiveViewportId()
+  );
+  const preferredType = currentViewport?.type === 'volume3d' ? 'Surface' : 'Labelmap';
+  const unique = new Map<string, (typeof representationRows)[number]>();
+  representationRows.forEach(row => {
+    if (!unique.has(row.segmentation.segmentationId) || row.representation.type === preferredType)
+      unique.set(row.segmentation.segmentationId, row);
+  });
+  const segmentationsWithRepresentations = [...unique.values()];
+  const activeSegmentation = segmentationService.getActiveSegmentation(activeViewportId);
+  const activeSegment = segmentationService.getActiveSegment(activeViewportId);
+  const appearanceRepresentation = segmentationsWithRepresentations.find(
+    row => row.segmentation.segmentationId === activeSegmentation?.segmentationId
+  )?.representation;
+  const color =
+    activeSegment && activeSegmentation
+      ? segmentationService.getSegmentColor(
+          activeViewportId,
+          activeSegmentation.segmentationId,
+          activeSegment.segmentIndex
+        )
+      : undefined;
+  const appearanceTarget =
+    activeSegmentation && activeSegment
+      ? {
+          segmentationId: activeSegmentation.segmentationId,
+          segmentIndex: activeSegment.segmentIndex,
+          label: activeSegment.label,
+          color: color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : 'transparent',
+        }
+      : undefined;
+  const appearanceStyle =
+    allViewports && appearanceTarget && appearanceRepresentation?.type === 'Labelmap'
+      ? segmentationService.getStyle({
+          viewportId: activeViewportId,
+          segmentationId: appearanceTarget.segmentationId,
+          segmentIndex: appearanceTarget.segmentIndex,
+          type: appearanceRepresentation.type,
+        })
+      : undefined;
+  const setAppearance = (specifier, key: string, value: number | boolean) => {
+    if (allViewports) {
+      if (!specifier.segmentationId || !specifier.segmentIndex) return;
+      commandsManager.run('setMaskAppearance', { ...specifier, style: { [key]: value } });
+    } else {
+      commandsManager.run('setSegmentationStyle', { ...specifier, key, value });
+    }
+  };
 
   // Extract customization options
   const segmentationTableMode = customizationService.getCustomization(
@@ -26,11 +101,11 @@ export default function PanelSegmentation({ children }: withAppTypes) {
   const showAddSegment = customizationService.getCustomization('panelSegmentation.showAddSegment');
   const CustomDropdownMenuContent = customizationService.getCustomization(
     'panelSegmentation.customDropdownMenuContent'
-  );
+  ) as unknown as React.ComponentType;
 
   const CustomSegmentStatisticsHeader = customizationService.getCustomization(
     'panelSegmentation.customSegmentStatisticsHeader'
-  );
+  ) as unknown as React.ComponentType;
 
   // Create handlers object for all command runs
   const handlers = {
@@ -41,7 +116,11 @@ export default function PanelSegmentation({ children }: withAppTypes) {
       commandsManager.run('addSegment', { segmentationId });
     },
     onSegmentClick: (segmentationId, segmentIndex) => {
-      commandsManager.run('setActiveSegmentAndCenter', { segmentationId, segmentIndex });
+      commandsManager.run('setActiveSegmentAndCenter', {
+        segmentationId,
+        segmentIndex,
+        highlightSegment: !allViewports,
+      });
     },
     onSegmentEdit: (segmentationId, segmentIndex) => {
       commandsManager.run('editSegmentLabel', { segmentationId, segmentIndex });
@@ -50,19 +129,24 @@ export default function PanelSegmentation({ children }: withAppTypes) {
       commandsManager.run('editSegmentationLabel', { segmentationId });
     },
     onSegmentColorClick: (segmentationId, segmentIndex) => {
-      commandsManager.run('editSegmentColor', { segmentationId, segmentIndex });
+      commandsManager.run('editSegmentColor', { segmentationId, segmentIndex, allViewports });
     },
     onSegmentDelete: (segmentationId, segmentIndex) => {
       commandsManager.run('deleteSegment', { segmentationId, segmentIndex });
     },
     onToggleSegmentVisibility: (segmentationId, segmentIndex, type) => {
-      commandsManager.run('toggleSegmentVisibility', { segmentationId, segmentIndex, type });
+      commandsManager.run('toggleSegmentVisibility', {
+        segmentationId,
+        segmentIndex,
+        type,
+        allViewports,
+      });
     },
     onToggleSegmentLock: (segmentationId, segmentIndex) => {
       commandsManager.run('toggleSegmentLock', { segmentationId, segmentIndex });
     },
     onToggleSegmentationRepresentationVisibility: (segmentationId, type) => {
-      commandsManager.run('toggleSegmentationVisibility', { segmentationId, type });
+      commandsManager.run('toggleSegmentationVisibility', { segmentationId, type, allViewports });
     },
     onSegmentationDownload: segmentationId => {
       commandsManager.run('downloadSegmentation', { segmentationId });
@@ -79,17 +163,17 @@ export default function PanelSegmentation({ children }: withAppTypes) {
     onSegmentationDelete: segmentationId => {
       commandsManager.run('deleteSegmentation', { segmentationId });
     },
-    setFillAlpha: ({ type }, value) => {
-      commandsManager.run('setFillAlpha', { type, value });
+    setFillAlpha: (specifier, value) => {
+      setAppearance(specifier, 'fillAlpha', value);
     },
-    setOutlineWidth: ({ type }, value) => {
-      commandsManager.run('setOutlineWidth', { type, value });
+    setOutlineWidth: (specifier, value) => {
+      setAppearance(specifier, 'outlineWidth', value);
     },
-    setRenderFill: ({ type }, value) => {
-      commandsManager.run('setRenderFill', { type, value });
+    setRenderFill: (specifier, value) => {
+      setAppearance(specifier, 'renderFill', value);
     },
-    setRenderOutline: ({ type }, value) => {
-      commandsManager.run('setRenderOutline', { type, value });
+    setRenderOutline: (specifier, value) => {
+      setAppearance(specifier, 'renderOutline', value);
     },
     setFillAlphaInactive: ({ type }, value) => {
       commandsManager.run('setFillAlphaInactive', { type, value });
@@ -107,10 +191,16 @@ export default function PanelSegmentation({ children }: withAppTypes) {
     if (!Labelmap) {
       return { segmentationId, isExportable: true };
     }
+    const labelmap = Labelmap as {
+      imageIds?: string[];
+      volumeId?: string;
+      referencedImageIds?: string[];
+    };
+    const volume = labelmap.volumeId ? cache.getVolume(labelmap.volumeId) : undefined;
+    const imageIds = labelmap.imageIds || volume?.imageIds || [];
 
     // Check if any segments have anything drawn in any of the viewports
     const hasAnySegmentData = (() => {
-      const imageIds = Labelmap.imageIds;
       if (!imageIds?.length) return false;
 
       for (const imageId of imageIds) {
@@ -128,8 +218,11 @@ export default function PanelSegmentation({ children }: withAppTypes) {
       return { segmentationId, isExportable: false };
     }
 
-    const referencedImageIds = Labelmap.referencedImageIds;
-    const firstImageId = referencedImageIds[0];
+    const firstImageId =
+      labelmap.referencedImageIds?.[0] ||
+      cache.getImage(imageIds[0])?.referencedImageId ||
+      volume?.referencedImageIds?.[0];
+    if (!firstImageId) return { segmentationId, isExportable: false };
     const instance = metaData.get('instance', firstImageId);
 
     if (!instance) {
@@ -151,11 +244,22 @@ export default function PanelSegmentation({ children }: withAppTypes) {
 
   // Common props for SegmentationTable
   const tableProps = {
-    disabled,
+    disabled: disabled || !readyViewportId || readyViewportId !== activeViewportId,
     addSegmentationDisabled: !canAddSegmentation,
     data: segmentationsWithRepresentations,
     mode: segmentationTableMode,
-    title: 'Segmentations',
+    title,
+    ...(allViewports
+      ? {
+          appearanceScope: 'segment' as const,
+          appearanceTarget,
+          appearanceStyle,
+          appearanceDisabledReason:
+            appearanceRepresentation?.type !== 'Labelmap'
+              ? '请选择二维切片窗口，设置当前 Mask 的填充与轮廓。'
+              : undefined,
+        }
+      : {}),
     exportOptions,
     disableEditing: disableEditing || readOnly,
     onSegmentationAdd,

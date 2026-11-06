@@ -1,4 +1,6 @@
 {
+  "Segment": "Mask",
+  "Segmentation": "标注集",
   "Image": "图像",
   "Layout": "显示窗口",
   "Measurements": "测量值",

@@ -22,9 +22,9 @@ export const CustomSegmentStatisticsHeader = ({
   const { t } = useTranslation('SegmentationTable');
 
   const segmentation = segmentationService.getSegmentation(segmentationId);
-  const segment = segmentation.segments[segmentIndex];
-  const cachedStats = segment.cachedStats;
-  const namedStats = cachedStats.namedStats;
+  // A split undo removes multiple segments before React unmounts their statistics rows.
+  const segment = segmentation?.segments?.[segmentIndex];
+  const namedStats = segment?.cachedStats?.namedStats;
 
   if (!namedStats) {
     return null;

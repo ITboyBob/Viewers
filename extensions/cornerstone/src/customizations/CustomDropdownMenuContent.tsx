@@ -19,7 +19,7 @@ import { useSystem } from '@ohif/core/src';
  * Custom dropdown menu component for segmentation panel that uses context for data
  */
 export const CustomDropdownMenuContent = () => {
-  const { commandsManager } = useSystem();
+  const { commandsManager, servicesManager } = useSystem();
   const { t } = useTranslation('SegmentationTable');
   const {
     onSegmentationAdd,
@@ -68,8 +68,16 @@ export const CustomDropdownMenuContent = () => {
     onSegmentationDownloadRTSS: segmentationId => {
       commandsManager.run('downloadRTSS', { segmentationId });
     },
-    onSegmentationDownload: segmentationId => {
-      commandsManager.run('downloadSegmentation', { segmentationId });
+    onSegmentationDownload: async segmentationId => {
+      try {
+        await commandsManager.run('exportMaskSegmentation', { segmentationId });
+      } catch (error) {
+        servicesManager.services.uiNotificationService.show({
+          title: 'DICOM SEG 导出失败',
+          message: error instanceof Error ? error.message : '请检查当前标注集后重试。',
+          type: 'error',
+        });
+      }
     },
     downloadCSVSegmentationReport: segmentationId => {
       commandsManager.run('downloadCSVSegmentationReport', { segmentationId });

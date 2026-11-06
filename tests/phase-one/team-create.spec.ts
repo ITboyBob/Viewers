@@ -98,6 +98,7 @@ for (const view of ['team', 'recent'] as const) {
     await page.keyboard.press('Escape');
     const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: '创建新任务' }).click();
+    await page.getByRole('menuitem', { name: '选择文件', exact: true }).click();
     const selection = await chooser;
     expect(selection.isMultiple()).toBe(true);
     const sample = syntheticSeries();
@@ -189,6 +190,7 @@ test('列表读取失败仍可创建；全失败不登记，部分成功与丢�
   async function choose(files: Parameters<FileChooser['setFiles']>[0]) {
     const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: '创建新任务' }).click();
+    await page.getByRole('menuitem', { name: '选择文件', exact: true }).click();
     await (await chooser).setFiles(files);
   }
   await choose([

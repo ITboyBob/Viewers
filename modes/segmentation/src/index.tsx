@@ -10,6 +10,7 @@ const ohif = {
 };
 
 const cornerstone = {
+  maskManager: '@ohif/extension-cornerstone.panelModule.panelMaskManager',
   viewport: '@ohif/extension-cornerstone.viewportModule.cornerstone',
   panelTool: '@ohif/extension-cornerstone.panelModule.panelSegmentationWithTools',
   measurements: '@ohif/extension-cornerstone.panelModule.panelMeasurement',
@@ -191,7 +192,7 @@ function modeFactory({ modeConfiguration }) {
           return {
             id: ohif.layout,
             props: {
-              leftPanels: [ohif.leftPanel],
+              leftPanels: [cornerstone.maskManager, ohif.leftPanel],
               leftPanelResizable: true,
               rightPanels: [cornerstone.panelTool],
               rightPanelResizable: true,

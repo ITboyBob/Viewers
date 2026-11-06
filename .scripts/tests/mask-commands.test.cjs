@@ -71,7 +71,8 @@ const hook = registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === '@cornerstonejs/core') return { url: 'mask-sdk:core', shortCircuit: true };
     if (specifier === '@cornerstonejs/tools') return { url: 'mask-sdk:tools', shortCircuit: true };
-    if (specifier === './maskAlgorithms') return nextResolve(`${specifier}.ts`, context);
+    if (['./maskAlgorithms', './maskRoi', './maskHistory'].includes(specifier))
+      return nextResolve(`${specifier}.ts`, context);
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
@@ -80,7 +81,7 @@ const hook = registerHooks({
         format: 'module',
         shortCircuit: true,
         source:
-          'export const { VolumeViewport, StackViewport, cache, utilities } = globalThis.__maskSdk; export const Types = {};',
+          'export const { VolumeViewport, StackViewport, cache, utilities } = globalThis.__maskSdk; export const eventTarget={dispatchEvent:()=>true}; export const metaData={get:()=>undefined}; export const Types = {};',
       };
     if (url === 'mask-sdk:tools')
       return {

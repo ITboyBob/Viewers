@@ -1,6 +1,7 @@
 import { eventTarget } from '@cornerstonejs/core';
 
 export const MASK_OPERATION_EVENT = 'OHIF_MASK_VOLUME_OPERATION';
+export const MASK_BRUSH_SIZE_EVENT = 'OHIF_MASK_BRUSH_SIZE';
 export type MaskOperationStatus = {
   phase: 'start' | 'progress' | 'complete' | 'error';
   message: string;

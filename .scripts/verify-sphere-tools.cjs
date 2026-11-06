@@ -111,6 +111,7 @@ async function activeTool(page) {
           await page.evaluate(() =>
             window.commandsManager.run('setToolActiveToolbar', { toolName: 'CircularBrush' })
           );
+          await page.getByRole('tab', { name: '阈值', exact: true }).click();
           await page.getByRole('button', { name: '应用阈值到当前切片', exact: true }).click();
           await expect(page.getByRole('status')).toContainText('阈值选区完成');
         }

@@ -24,6 +24,7 @@ async function login(page: Page, user: any) {
 async function create(page: Page) {
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: '创建新任务', exact: true }).click();
+  await page.getByRole('menuitem', { name: '选择文件', exact: true }).click();
   const completed = page.waitForResponse(
     r => r.request().method() === 'POST' && isImportComplete(r.url())
   );
