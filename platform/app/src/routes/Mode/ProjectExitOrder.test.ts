@@ -62,6 +62,8 @@ beforeEach(() => {
   const project = {
     batch_id: 'b',
     task_id: 'real',
+    importer_uid: 'importer',
+    viewer_uid: 'importer',
     phase: 'registered',
     mode_path: 'segmentation/dicomlocal',
     successes: [],
@@ -158,11 +160,21 @@ afterEach(() => {
   warnings.mockRestore();
 });
 const mount = () => render(h(MemoryRouter, null, h(ModeRoute, props)));
-test('桥接先于route.init；退出退订和abort先于destroy，原生顺序不变、scope最后释放', async () => {
+test('初始化静默；就绪后事件触发请求，退出按序清理', async () => {
   const view = mount();
   await waitFor(() => expect(props.mode.onSetupRouteComplete).toHaveBeenCalled());
-  expect(events.indexOf('subscribe')).toBeLessThan(events.indexOf('route-init'));
+  expect(touch).not.toHaveBeenCalled();
+  expect(measurement.listeners.measurement).toHaveLength(1);
+  expect(segmentation.listeners.segmentation).toHaveLength(1);
+  for (const event of ['route-init', 'default-init', 'subscribe']) {
+    expect(events).toContain(event);
+  }
+  expect(events.indexOf('route-init')).toBeLessThan(events.indexOf('subscribe'));
+  expect(events.indexOf('default-init')).toBeLessThan(events.indexOf('subscribe'));
+  act(broadcast);
   expect(touch).toHaveBeenCalledTimes(1);
+  const signal: AbortSignal = touch.mock.calls[0][1];
+  expect(signal.aborted).toBe(false);
   events.length = 0;
   view.unmount();
   await flush();
@@ -178,8 +190,13 @@ test('桥接先于route.init；退出退订和abort先于destroy，原生顺序�
     'scope-release',
     'files-release',
   ]);
+  broadcast();
+  segmentation._broadcastEvent('segmentation', {});
   expect(touch).toHaveBeenCalledTimes(1);
   expect(measurement.listeners.measurement).toHaveLength(0);
+  expect(segmentation.listeners.segmentation).toHaveLength(0);
+  expect(signal.aborted).toBe(true);
+  expect(runtime.getCurrent()).toBeNull();
 });
 test('route.init晚resolve即刻退订，不能复活桥接或进入defaultRouteInit', async () => {
   let finish;
@@ -221,17 +238,47 @@ test('defaultRouteInit晚resolve清掉新返回对象，先前route.init回调�
   expect(events.at(-2)).toBe('scope-release');
 });
 test('mode退出抛错仍退订、释放并向调用方传播原异常', async () => {
+  const exitError = new Error('合成退出故障');
   props.mode.onModeExit = () => {
     events.push('mode-error');
     broadcast();
-    throw new Error('合成退出故障');
+    throw exitError;
   };
   const view = mount();
   await waitFor(() => expect(props.mode.onSetupRouteComplete).toHaveBeenCalled());
-  expect(() => view.unmount()).toThrow('合成退出故障');
-  expect(events).toContain('native-unsubscribe');
-  expect(events).toContain('scope-release');
+  expect(touch).not.toHaveBeenCalled();
+  act(broadcast);
   expect(touch).toHaveBeenCalledTimes(1);
+  const signal: AbortSignal = touch.mock.calls[0][1];
+  expect(signal.aborted).toBe(false);
+  events.length = 0;
+  let thrown: unknown;
+  try {
+    view.unmount();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBe(exitError);
+  await flush();
+  expect(events).toEqual([
+    'unsubscribe',
+    'unsubscribe',
+    'abort',
+    'mode-error',
+    'hotkeys',
+    'route-unsubscribe',
+    'native-unsubscribe',
+    'extension-destroy',
+    'scope-release',
+    'files-release',
+  ]);
+  broadcast();
+  segmentation._broadcastEvent('segmentation', {});
+  expect(touch).toHaveBeenCalledTimes(1);
+  expect(measurement.listeners.measurement).toHaveLength(0);
+  expect(segmentation.listeners.segmentation).toHaveLength(0);
+  expect(signal.aborted).toBe(true);
+  expect(runtime.getCurrent()).toBeNull();
 });
 test('setup异常主动失活、原生退出和释放，不留下业务监听', async () => {
   props.mode.onModeEnter = () => {
@@ -251,4 +298,20 @@ test('StrictMode重复mount和cleanup不会让旧generation复活或遗留订阅
   expect(runtime.getCurrent()).toBeNull();
   expect(measurement.listeners.measurement ?? []).toHaveLength(0);
   expect(events.filter(event => event === 'scope-release')).toHaveLength(1);
+});
+test.each([
+  { name: '缺少导入者身份', identity: { importer_uid: undefined } },
+  { name: '读取者与导入者不同', identity: { viewer_uid: 'other-user' } },
+])('$name时不启动时间桥接或发送请求', async ({ identity }) => {
+  Object.assign(runtime.getCurrent(), identity);
+  mount();
+  await waitFor(() => expect(props.mode.onSetupRouteComplete).toHaveBeenCalled());
+  act(() => {
+    broadcast();
+    segmentation._broadcastEvent('segmentation', {});
+  });
+  expect(events).not.toContain('subscribe');
+  expect(measurement.listeners.measurement ?? []).toHaveLength(0);
+  expect(segmentation.listeners.segmentation ?? []).toHaveLength(0);
+  expect(touch).not.toHaveBeenCalled();
 });

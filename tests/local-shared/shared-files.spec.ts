@@ -1,3 +1,4 @@
+import { isImportComplete } from '../phase-one/businessImport';
 import { test, expect } from '@playwright/test';
 import { randomUUID, createHash } from 'node:crypto';
 import type {
@@ -27,8 +28,7 @@ test('G1/G2：真实登记、原生IDB事务与BC两阶段参与、配色及失�
   );
   const sample = syntheticSeries(3);
   const registered = page.waitForResponse(
-    response =>
-      response.request().method() === 'POST' && /\/tasks$/.test(new URL(response.url()).pathname)
+    response => response.request().method() === 'POST' && isImportComplete(response.url())
   );
   await page
     .getByLabel('导入文件', { exact: true })
@@ -38,7 +38,7 @@ test('G1/G2：真实登记、原生IDB事务与BC两阶段参与、配色及失�
       ...sample.files.slice(1),
     ]);
   const response = await registered;
-  expect(response.status()).toBe(201);
+  expect(response.status()).toBe(200);
   const task = (await response.json()).data;
   await expect(page.locator('.cornerstone-viewport-element').first()).toBeVisible();
   await expect

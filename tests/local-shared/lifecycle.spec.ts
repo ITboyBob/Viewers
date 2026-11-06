@@ -1,9 +1,11 @@
+import { isImportComplete } from '../phase-one/businessImport';
 import { copySharedLink } from './sharedLink';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import type {
   BusinessServices,
+  LocalProject,
   SharedFileRecord,
 } from '../../platform/core/src/types/BusinessContracts';
 import { syntheticSeries } from '../phase-one/syntheticDicom';
@@ -13,6 +15,7 @@ type NativeWindow = Window & {
   releaseNativeStack?: () => void;
   nativeStackPending?: boolean;
   savedSharedFile?: SharedFileRecord;
+  invalidatedSourceProject?: LocalProject;
   services: {
     businessServices: BusinessServices;
     measurementService: { clearMeasurements(): void };
@@ -108,7 +111,7 @@ test('S5普通双原生窗口：同默认个人资料、不同真实账户、双
     expect(windows.evidence.nonDefaultContexts).toEqual([]);
     let creates = 0;
     windows.a.on('request', req => {
-      if (req.method() === 'POST' && /\/tasks$/.test(new URL(req.url()).pathname)) {
+      if (req.method() === 'POST' && isImportComplete(req.url())) {
         creates++;
       }
     });
@@ -449,8 +452,10 @@ test('S5客户端受控404：合法旧广播关闭同一源实例，B保留画�
     });
     await enter(windows.b, a.href);
     const original = await windows.a.evaluate(() => {
-      const p = (window as unknown as NativeWindow).services.businessServices.localCollaboration!
-        .participation!;
+      const native = window as unknown as NativeWindow;
+      const business = native.services.businessServices;
+      native.invalidatedSourceProject = business.projectRuntime!.getCurrent()!;
+      const p = business.localCollaboration!.participation!;
       return { id: p.identity.participant_id, phase: p.getSnapshot().phase };
     });
     expect(original.phase).toBe('active');
@@ -481,11 +486,12 @@ test('S5客户端受控404：合法旧广播关闭同一源实例，B保留画�
           return {
             id: p.identity.participant_id,
             phase: p.getSnapshot().phase,
-            project: b.projectRuntime!.getCurrent()!.phase,
+            project: (window as unknown as NativeWindow).invalidatedSourceProject!.phase,
+            runtimeReleased: b.projectRuntime!.getCurrent() === null,
           };
         })
       )
-      .toEqual({ id: original.id, phase: 'closed', project: 'invalid' });
+      .toEqual({ id: original.id, phase: 'closed', project: 'disposed', runtimeReleased: true });
     await expect(windows.b.getByRole('status').filter({ hasText: '源窗口已离开' })).toBeVisible();
     await expect(windows.b.locator('canvas').first()).toBeVisible();
     await windows.a.evaluate(() =>

@@ -107,7 +107,7 @@ function sharingServices(): BusinessServices {
         getSnapshot: () => ({ publication_phase: 'ready' }),
       }),
     },
-    participation: { getSnapshot: () => ({ phase: 'active' }) },
+    participation: { getSnapshot: () => ({ phase: 'active' }), subscribe: () => () => {} },
   } as unknown as BusinessServices['localCollaboration'];
   return container;
 }

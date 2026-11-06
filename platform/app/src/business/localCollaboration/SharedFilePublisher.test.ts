@@ -41,10 +41,12 @@ function setup() {
       return () => sessionListeners.delete(listener);
     },
   } as unknown as BusinessSession;
-  const projects = {
-    isCurrent: value => value === project,
+  const projectMethods = {
+    getCurrent: () => project,
+    isCurrent: (value: LocalProject) => value === project,
     subscribe: () => () => undefined,
-  } as LocalProjects;
+  } satisfies Pick<LocalProjects, 'getCurrent' | 'isCurrent' | 'subscribe'>;
+  const projects = projectMethods as unknown as LocalProjects;
   const identities = new LocalParticipationIdentity(
     session,
     projects,

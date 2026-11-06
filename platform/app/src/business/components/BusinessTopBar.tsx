@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer } from 'react';
+import React, { useCallback, useSyncExternalStore } from 'react';
 import SharedLinkButton from './SharedLinkButton';
 import type { BusinessServices } from '@ohif/core';
 import useBusinessSession from '../useBusinessSession';
@@ -12,6 +12,49 @@ import '../../routes/Account/AccountFonts.css';
 import './BusinessDialogs.css';
 import './BusinessFonts.css';
 
+const noSharedTask = () => null;
+
+function useSharedLinkTask(services: BusinessServices) {
+  const shared = services.localCollaboration;
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      let participation = shared?.participation;
+      let stopParticipation = participation?.subscribe(listener);
+      const update = () => {
+        if (participation !== shared?.participation) {
+          stopParticipation?.();
+          participation = shared?.participation;
+          stopParticipation = participation?.subscribe(listener);
+        }
+        listener();
+      };
+      const stops = [
+        shared?.publisher?.subscribe(update),
+        shared?.sharedView?.subscribe(update),
+        services.session.subscribe(update),
+        services.localProjects?.subscribe(update),
+      ];
+      return () => {
+        stops.forEach(stop => stop?.());
+        stopParticipation?.();
+      };
+    },
+    [services, shared]
+  );
+  const read = useCallback(() => {
+    if (services.session.getSnapshot().status !== 'authenticated') {
+      return null;
+    }
+    const source = shared?.identities.getSource();
+    return source?.getSnapshot().publication_phase === 'ready' &&
+      shared?.participation?.getSnapshot().phase === 'active'
+      ? source.task_id
+      : null;
+  }, [services, shared]);
+  // UUID/null 是稳定快照；React 会补查 render 与 subscribe 之间的状态变化。
+  return useSyncExternalStore(subscribe, read, noSharedTask);
+}
+
 export default function BusinessTopBar({
   page,
   services,
@@ -24,10 +67,7 @@ export default function BusinessTopBar({
   const snapshot = useBusinessSession(services.session);
   const opener = useOpenTask(services);
   const logout = useBusinessLogout(services);
-  const [, refreshSharing] = useReducer(value => value + 1, 0);
-  const shared = services.localCollaboration;
-  useEffect(() => shared?.publisher?.subscribe(refreshSharing), [shared?.publisher]);
-  useEffect(() => services.localProjects?.subscribe(refreshSharing), [services.localProjects]);
+  const sharedTaskId = useSharedLinkTask(services);
   const currentProject = services.projectRuntime?.getCurrent?.();
   const taskId =
     page === 'viewer' &&
@@ -36,10 +76,6 @@ export default function BusinessTopBar({
     currentProject.phase === 'registered'
       ? currentProject.task_id
       : undefined;
-  const source = shared?.identities.getSource();
-  const sharingReady =
-    source?.getSnapshot().publication_phase === 'ready' &&
-    shared?.participation?.getSnapshot().phase === 'active';
   if (snapshot.status !== 'authenticated' || !snapshot.context) {
     return null;
   }
@@ -90,10 +126,10 @@ export default function BusinessTopBar({
           taskId={currentProject?.phase === 'registered' ? currentProject.task_id : undefined}
         />
       )}
-      {page === 'viewer' && sharingReady && (
+      {page === 'viewer' && sharedTaskId && (
         <SharedLinkButton
-          key={source.task_id}
-          taskId={source.task_id}
+          key={sharedTaskId}
+          taskId={sharedTaskId}
         />
       )}
     </div>

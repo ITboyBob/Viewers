@@ -39,7 +39,12 @@ export class LocalParticipationIdentity implements LocalParticipationIdentities 
       }
     });
     projects.subscribe(() => {
-      if (this.project && !projects.isCurrent(this.project)) {
+      if (
+        this.project &&
+        (projects.getCurrent() !== this.project ||
+          this.project.phase === 'invalid' ||
+          this.project.phase === 'disposed')
+      ) {
         this.sourceContext?.close('source_invalid');
       }
     });
