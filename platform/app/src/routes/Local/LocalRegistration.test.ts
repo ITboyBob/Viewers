@@ -42,6 +42,7 @@ jest.mock(
   () => {
     const React = jest.requireActual('react');
     return {
+      ...jest.requireActual('../../../../ui-next/src/components/DropdownMenu'),
       Button: ({
         children,
         variant: _variant,
@@ -156,6 +157,17 @@ async function select(files = [file()], folder = false) {
       target: { files },
     });
   });
+}
+function openCreateMenu() {
+  fireEvent.keyDown(screen.getByRole('button', { name: '创建新任务' }), { key: 'Enter' });
+}
+function chooseCreateKind(kind: ImportSelection['kind'] = 'files') {
+  openCreateMenu();
+  fireEvent.click(
+    screen.getByRole('menuitem', {
+      name: kind === 'folder' ? '选择文件夹' : '选择文件',
+    })
+  );
 }
 test('共享引用先于解析保留，真实登记后异步发布且不阻塞原导航', async () => {
   const prepared = { attach: jest.fn(), cancel: jest.fn() };
@@ -432,42 +444,196 @@ test('导航自身抛错时释放已绑定scope，不保留假活跃运行时', 
   expect(store.getStudy('1')).toBeUndefined();
 });
 
-test('看板按钮取消选择零登记，选文件前冻结团队，成功导航后保留项目', async () => {
+test('看板菜单仅在选择入口后打开对应选择器，关闭菜单不卸载输入框', () => {
+  render(h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' }));
+  const filesInput = screen.getByLabelText('创建任务文件') as HTMLInputElement;
+  const folderInput = screen.getByLabelText('创建任务文件夹') as HTMLInputElement;
+  const filesClick = jest.spyOn(filesInput, 'click').mockImplementation(() => {});
+  const folderClick = jest.spyOn(folderInput, 'click').mockImplementation(() => {});
+  expect(filesInput.multiple).toBe(true);
+  expect(filesInput.hasAttribute('webkitdirectory')).toBe(false);
+  expect(folderInput.hasAttribute('webkitdirectory')).toBe(true);
+  expect(folderInput.hasAttribute('mozdirectory')).toBe(true);
+  expect(filesInput.hasAttribute('accept')).toBe(false);
+  expect(folderInput.hasAttribute('accept')).toBe(false);
+  expect(screen.queryByRole('menu')).toBeNull();
+  openCreateMenu();
+  expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+  expect(filesClick).not.toHaveBeenCalled();
+  expect(folderClick).not.toHaveBeenCalled();
+  expect(parse).not.toHaveBeenCalled();
+  expect(request).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('menuitem', { name: '选择文件' }));
+  expect(filesClick).toHaveBeenCalledTimes(1);
+  expect(folderClick).not.toHaveBeenCalled();
+  expect(screen.queryByRole('menu')).toBeNull();
+  chooseCreateKind('folder');
+  expect(folderClick).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(screen.getByLabelText('创建任务文件')).toBe(filesInput);
+  expect(screen.getByLabelText('创建任务文件夹')).toBe(folderInput);
+});
+
+test.each([
+  ['files', [file('单张')], '单张'],
+  ['files', [file('首张.dcm'), file('另一张.dcm')], '首张.dcm'],
+  ['folder', [file('首张', '检查/首张'), file('另一张.dcm', '检查/嵌套/另一张.dcm')], '检查'],
+] as const)('看板%s入口按批次导入所有选择文件，保持标题规则', async (kind, files, title) => {
+  render(h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' }));
+  chooseCreateKind(kind);
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText(kind === 'folder' ? '创建任务文件夹' : '创建任务文件'), {
+      target: { files },
+    });
+  });
+  expect(parse).toHaveBeenCalledTimes(1);
+  expect(parse).toHaveBeenCalledWith({ files: [...files], kind });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(
+    '/teams/team/tasks',
+    expect.objectContaining({ body: { title } })
+  );
+  expect(mockNavigate).toHaveBeenCalledTimes(1);
+});
+
+test('看板菜单支持键盘展开、Esc关闭与键盘选择目录', async () => {
+  render(h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' }));
+  const trigger = screen.getByRole('button', { name: '创建新任务' });
+  const folderClick = jest
+    .spyOn(screen.getByLabelText('创建任务文件夹') as HTMLInputElement, 'click')
+    .mockImplementation(() => {});
+  act(() => trigger.focus());
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  openCreateMenu();
+  const folderOption = screen.getByRole('menuitem', { name: '选择文件夹' });
+  act(() => folderOption.focus());
+  fireEvent.keyDown(folderOption, { key: 'Enter' });
+  expect(folderClick).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(parse).not.toHaveBeenCalled();
+});
+
+test('展开菜单后切换团队，选择入口时才冻结最新团队', async () => {
   snapshot.context!.memberships.push({
     team_id: 'joined',
     name: '其他团队',
     owner_uid: 'other',
     role: 'annotator',
   });
-  request.mockImplementation(async (path, options) => ({
+  request.mockImplementation(async (_path, options) => ({
     ...task(options.body.title),
-    team_id: path.includes('/joined/') ? 'joined' : 'team',
+    team_id: 'joined',
   }));
-  const props = { services: mockServices.businessServices, teamId: 'joined' };
+  const props = { services: mockServices.businessServices, teamId: 'team' };
   const view = render(h(CreateTaskButton, props));
-  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
-  fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [] } });
-  expect(parse).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
-  view.rerender(h(CreateTaskButton, { ...props, teamId: 'team' }));
+  openCreateMenu();
+  view.rerender(h(CreateTaskButton, { ...props, teamId: 'joined' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '选择文件夹' }));
   await act(async () =>
-    fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [file()] } })
+    fireEvent.change(screen.getByLabelText('创建任务文件夹'), {
+      target: { files: [file('a.dcm', '检查/a.dcm')] },
+    })
   );
   expect(request).toHaveBeenCalledWith(
     '/teams/joined/tasks',
     expect.objectContaining({ method: 'POST' })
   );
-  expect(snapshot.currentTeamId).toBe('team');
-  expect(mockNavigate).toHaveBeenCalled();
-  const project = mockServices.businessServices.localProjects.getCurrent();
-  view.unmount();
-  expect(mockServices.businessServices.localProjects.isCurrent(project)).toBe(true);
 });
+
+test.each<ImportSelection['kind']>(['files', 'folder'])(
+  '看板%s入口取消后可重复选择，失败后清空输入值且导入中禁用',
+  async kind => {
+    let finish!: (batch: unknown) => void;
+    parse.mockReturnValueOnce(
+      new Promise(resolve => {
+        finish = resolve;
+      })
+    );
+    render(h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' }));
+    const input = screen.getByLabelText(
+      kind === 'folder' ? '创建任务文件夹' : '创建任务文件'
+    ) as HTMLInputElement;
+    chooseCreateKind(kind);
+    fireEvent.change(input, { target: { files: [] } });
+    expect(parse).not.toHaveBeenCalled();
+    const files = [file('坏.dcm', kind === 'folder' ? '检查/坏.dcm' : '')];
+    chooseCreateKind(kind);
+    const resetValue = jest.spyOn(input, 'value', 'set');
+    fireEvent.change(input, { target: { files } });
+    expect(resetValue).toHaveBeenCalledWith('');
+    resetValue.mockRestore();
+    expect((screen.getByRole('button', { name: '创建新任务' }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect((screen.getByLabelText('创建任务文件') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('创建任务文件夹') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(parse).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      finish({ batch_id: randomUUID(), kind, successes: [], failures: [], study_uids: [] })
+    );
+    chooseCreateKind(kind);
+    await act(async () => fireEvent.change(input, { target: { files } }));
+    expect(parse).toHaveBeenCalledTimes(2);
+    expect(request).not.toHaveBeenCalled();
+  }
+);
+
+test('看板业务服务不可用时两个选择器均禁用', () => {
+  render(h(CreateTaskButton, { services: {} as never, teamId: 'team' }));
+  expect((screen.getByRole('button', { name: '创建新任务' }) as HTMLButtonElement).disabled).toBe(
+    true
+  );
+  expect((screen.getByLabelText('创建任务文件') as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText('创建任务文件夹') as HTMLInputElement).disabled).toBe(true);
+});
+
+test.each<ImportSelection['kind']>(['files', 'folder'])(
+  '看板%s入口取消零登记，打开选择器前冻结团队，成功导航后保留项目',
+  async kind => {
+    snapshot.context!.memberships.push({
+      team_id: 'joined',
+      name: '其他团队',
+      owner_uid: 'other',
+      role: 'annotator',
+    });
+    request.mockImplementation(async (path, options) => ({
+      ...task(options.body.title),
+      team_id: path.includes('/joined/') ? 'joined' : 'team',
+    }));
+    const props = { services: mockServices.businessServices, teamId: 'joined' };
+    const view = render(h(CreateTaskButton, props));
+    const label = kind === 'folder' ? '创建任务文件夹' : '创建任务文件';
+    chooseCreateKind(kind);
+    fireEvent.change(screen.getByLabelText(label), { target: { files: [] } });
+    expect(parse).not.toHaveBeenCalled();
+    chooseCreateKind(kind);
+    view.rerender(h(CreateTaskButton, { ...props, teamId: 'team' }));
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText(label), {
+        target: { files: [file('合成.dcm', kind === 'folder' ? '根/合成.dcm' : '')] },
+      })
+    );
+    expect(request).toHaveBeenCalledWith(
+      '/teams/joined/tasks',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(snapshot.currentTeamId).toBe('team');
+    expect(mockNavigate).toHaveBeenCalled();
+    const project = mockServices.businessServices.localProjects.getCurrent();
+    view.unmount();
+    expect(mockServices.businessServices.localProjects.isCurrent(project)).toBe(true);
+  }
+);
 
 test('看板创建入口全失败不登记、可重新选择，登记失败重试同一幂等键', async () => {
   render(h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' }));
   async function choose(files) {
-    fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+    chooseCreateKind();
     await act(async () =>
       fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files } })
     );
@@ -497,7 +663,7 @@ test('看板按钮处理期间禁用重复创建，部分成功继续登记，�
     true
   );
   view.rerender(h(CreateTaskButton, props));
-  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  chooseCreateKind();
   await act(async () =>
     fireEvent.change(screen.getByLabelText('创建任务文件'), {
       target: { files: [file('坏.dcm'), file()] },
@@ -509,6 +675,7 @@ test('看板按钮处理期间禁用重复创建，部分成功继续登记，�
   expect(screen.getByText('以下文件导入失败：坏.dcm')).toBeTruthy();
   expect(screen.getByRole('status').textContent).toContain('登记');
   fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  expect(screen.queryByRole('menu')).toBeNull();
   expect(request).toHaveBeenCalledTimes(1);
   await act(async () => finish(task()));
   expect(mockNavigate).toHaveBeenCalledTimes(1);
@@ -532,7 +699,7 @@ test('看板解析中离开取消批次，晚结果不登记；未开始导入�
   const view = render(
     h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'team' })
   );
-  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  chooseCreateKind();
   await act(async () =>
     fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [file()] } })
   );
@@ -551,7 +718,7 @@ test('看板显式目标失效时不拥有原项目，离开入口也不销毁�
   const view = render(
     h(CreateTaskButton, { services: mockServices.businessServices, teamId: 'unknown' })
   );
-  fireEvent.click(screen.getByRole('button', { name: '创建新任务' }));
+  chooseCreateKind();
   await act(async () =>
     fireEvent.change(screen.getByLabelText('创建任务文件'), { target: { files: [file()] } })
   );
